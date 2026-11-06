@@ -1,11 +1,21 @@
 "use client";
 
 import { useMemo } from "react";
-import { createAuthenticationAdapter, lightTheme, RainbowKitAuthenticationProvider, RainbowKitProvider } from "@rainbow-me/rainbowkit";
+import { createAuthenticationAdapter, darkTheme, type Theme, RainbowKitAuthenticationProvider, RainbowKitProvider } from "@rainbow-me/rainbowkit";
 import { useConfig } from "wagmi";
 import { getAccount } from "wagmi/actions";
 import { parseSiweMessage } from "viem/siwe";
 import { studioRequest, useStudio } from "./studio-provider";
+
+// Dark editorial theme: graphite surfaces, light pill actions, sharp modal, no shadows.
+const baseTheme = darkTheme({ accentColor: "#f4f3f1", accentColorForeground: "#0a0a0b", borderRadius: "none", fontStack: "system", overlayBlur: "small" });
+const walletTheme: Theme = {
+  ...baseTheme,
+  fonts: { body: "var(--font-inter), ui-sans-serif, system-ui, sans-serif" },
+  radii: { ...baseTheme.radii, actionButton: "75px", connectButton: "75px", menuButton: "75px", modal: "0px", modalMobile: "0px" },
+  shadows: { connectButton: "none", dialog: "none", profileDetailsAction: "none", selectedOption: "none", selectedWallet: "none", walletLogo: "none" },
+  colors: { ...baseTheme.colors, modalBackground: "#111113", modalBorder: "rgba(255, 255, 255, 0.16)", modalBackdrop: "rgba(0, 0, 0, 0.7)", generalBorder: "rgba(255, 255, 255, 0.08)", menuItemBackground: "rgba(255, 255, 255, 0.06)", connectButtonBackground: "#0a0a0b", connectButtonInnerBackground: "#1a1a1e" },
+};
 
 export function RainbowStudioProvider({ children }: { children: React.ReactNode }) {
   const config = useConfig();
@@ -34,7 +44,7 @@ export function RainbowStudioProvider({ children }: { children: React.ReactNode 
     signOut: () => clearSession().catch(() => {}),
   }), [config, execute, clearSession]);
   return <RainbowKitAuthenticationProvider adapter={adapter} status={loading ? "loading" : data.user ? "authenticated" : "unauthenticated"}>
-    <RainbowKitProvider modalSize="compact" appInfo={{ appName: "ConsentCraft" }} theme={lightTheme({ accentColor: "#c6b3ed", accentColorForeground: "#242424", borderRadius: "small", fontStack: "system", overlayBlur: "small" })}>
+    <RainbowKitProvider modalSize="compact" appInfo={{ appName: "ConsentCraft" }} theme={walletTheme}>
       {children}
     </RainbowKitProvider>
   </RainbowKitAuthenticationProvider>;
