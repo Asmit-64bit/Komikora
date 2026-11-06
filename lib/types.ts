@@ -10,6 +10,7 @@ export type Project = {
   priceWei?: string; review?: ChainReview; reviewHistory?: ChainReview[];
   chainTransactions?: ChainTransaction[];
   chainError?: string;
+  publicationId?: string;
 };
 export type ChainReview = {
   salt: `0x${string}`; projectKey: `0x${string}`; chainId: number; contract: `0x${string}`;
