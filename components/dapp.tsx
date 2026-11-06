@@ -328,7 +328,7 @@ export function ListingPage({ publicationId, user, signIn }: { publicationId: st
       <h1>{listing.title}</h1><p>{listing.description}</p>
       <div className="reader-byline"><span>By {explorerAddress(listing.author) ? <a href={explorerAddress(listing.author)} target="_blank" rel="noreferrer">{truncateAddress(listing.author)}</a> : truncateAddress(listing.author)}</span><span className="reader-dot">·</span><span>{PublicationStateLabels[listing.state]} · {ListingStateLabels[listing.listingState]}</span></div></div></div>
     {pages ? <div className="reader-paper"><div className="comic-panels">{pages.map((p, i) => <div className="comic-panel" key={i}><div className="comic-panel-image"><img src={p.image} alt={p.alt || `Page ${i + 1}`}/><span className="panel-number">0{i + 1}</span></div>{p.dialogue && <p>{p.dialogue}</p>}</div>)}</div></div>
-      : <div className="collectible-sale"><div>{listing.cover && <img src={listing.cover} alt="Cover preview" style={{ width: "100%", border: "1.5px solid var(--ink)" }}/>}</div>
+      : <div className="collectible-sale"><div>{listing.cover && <img src={listing.cover} alt="Cover preview" style={{ width: "100%" }}/>}</div>
         <div><div className="chain-price"><span>PRICE</span><strong>{eth(listing.price)}</strong></div>
           {!isConnected || !user ? <button className="button purple" onClick={signIn}>Connect wallet and sign in</button>
             : !sessionMatches ? <p className="form-error">Your connected wallet is not the signed-in account. Sign in again with this wallet.</p>

@@ -1,17 +1,47 @@
-.skip-link{position:fixed;top:8px;left:8px;transform:translateY(-160%);z-index:100;background:var(--yellow);padding:12px;border:2px solid var(--ink)}
-.skip-link:focus{transform:none}
-.preview-note{font-size:10px;color:var(--muted);margin:12px 0 22px;line-height:1.7}
-.review-checklist{display:grid;gap:12px;margin:22px 0;font-size:12px}
-.review-checklist p{display:flex;align-items:center;gap:10px}
-.preview-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:22px}
-.wallet-preview{margin:24px 0;padding:22px;background:#eee6f9;border:1.5px solid var(--ink);border-radius:4px}
-.wallet-preview p{font-size:12px;line-height:1.8;margin-top:12px;color:var(--muted)}
-.invitation-card .muted{overflow-wrap:anywhere}
-.panel-picker button:focus-visible{outline-offset:2px}
-.sample-label{font-size:8px}
-.invitation-list{display:grid;gap:20px}
-.invitation-card h2{margin:10px 0}
-.invitation-card .button{margin-top:20px}
-.topbar-actions .sign-out{display:flex}
-@media(max-width:760px){.sidebar{visibility:hidden}.sidebar.is-open{visibility:visible}}
-@media(max-width:520px){.topbar-actions .current-user{display:none}.topbar-actions{gap:6px}.topbar-actions .prototype-chip{display:flex;font-size:7px;letter-spacing:.3px}.topbar-actions .icon-button:not(.sign-out){display:none}.topbar .button.small{padding:7px 8px}.breadcrumb strong{font-size:9px}}
+.skip-link {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  transform: translateY(-160%);
+  z-index: 100;
+  background: var(--fg);
+  color: var(--bg);
+  border-radius: var(--radius-pill);
+  padding: 10px 22px;
+  font-size: 13px;
+  transition: transform var(--glide);
+}
+.skip-link:focus { transform: none; }
+.review-checklist { display: grid; gap: 12px; margin: 24px 0; font-size: 13px; }
+.review-checklist p { display: flex; align-items: center; gap: 12px; }
+.preview-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 24px; }
+.wallet-preview { margin: 26px 0; padding: 24px; background: var(--wash); }
+.wallet-preview p { font-size: 13px; line-height: 1.6; margin-top: 12px; color: var(--color-felt-gray); }
+.invitation-card .muted { overflow-wrap: anywhere; }
+.invitation-list { display: grid; gap: 48px 32px; }
+.invitation-card h2 { margin: 12px 0; }
+.invitation-card .button { margin-top: 24px; }
+.topbar-actions .sign-out { display: flex; }
+@media (max-width: 760px) {
+  .sidebar { visibility: hidden; }
+  .sidebar.is-open { visibility: visible; }
+}
+
+/* ——— Route transitions ———
+   Navigations run as React transitions, so <ViewTransition name="page"> around
+   the main content crossfades between routes: the old page fades out quickly
+   with a little blur, the new one settles in with a short rise. The shell
+   (sidebar, navbar, homepage silk) crossfades underneath as the root layer. */
+::view-transition-group(root),
+::view-transition-group(page) { animation-duration: .6s; animation-timing-function: var(--ease); }
+::view-transition-old(root) { animation: .45s ease-out both vt-fade-out; }
+::view-transition-new(root) { animation: .6s ease-out both vt-fade-in; }
+::view-transition-old(page) { animation: .28s ease-out both vt-fade-out, .28s ease-out both vt-blur-out; }
+::view-transition-new(page) { animation: .55s var(--ease) .12s both vt-fade-in, .7s var(--ease) .12s both vt-rise; }
+@keyframes vt-fade-out { to { opacity: 0; } }
+@keyframes vt-fade-in { from { opacity: 0; } }
+@keyframes vt-blur-out { to { filter: blur(4px); } }
+@keyframes vt-rise { from { transform: translateY(12px); filter: blur(4px); } }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+}
