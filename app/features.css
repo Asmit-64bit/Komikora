@@ -310,3 +310,8 @@
   .hero-copy p, .reader-heading p, .bottom-note p, .prototype-explainer p { font-size: 18px; }
   .page-heading p, .empty-state p { font-size: 17px; }
 }
+
+.upload-mode { display: inline-flex; gap: 4px; padding: 4px; margin-bottom: 18px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); max-width: 100%; flex-wrap: wrap; }
+.upload-mode button { border: 0; background: transparent; color: var(--color-felt-gray); padding: 8px 16px; border-radius: var(--radius-pill); font-size: 13px; cursor: pointer; }
+.upload-mode button.active { background: var(--fg); color: var(--bg); }
+.upload-area.document-upload { aspect-ratio: auto; min-height: 180px; padding: 28px 16px; margin-bottom: 18px; }
