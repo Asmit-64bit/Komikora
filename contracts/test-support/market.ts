@@ -44,6 +44,42 @@ export const CERTIFICATE_TYPES = {
   ],
 } as const;
 
+export const REPORT_TYPES = {
+  ReviewReport: [
+    { name: "publicationId", type: "uint256" },
+    { name: "manifestHash", type: "bytes32" },
+    { name: "arweaveBundleTxId", type: "bytes32" },
+    { name: "reportHash", type: "bytes32" },
+    { name: "modelVersion", type: "bytes32" },
+    { name: "promptVersion", type: "bytes32" },
+    { name: "policyId", type: "uint256" },
+    { name: "score", type: "uint16" },
+    { name: "flagged", type: "bool" },
+    { name: "aiCost", type: "uint256" },
+    { name: "jobId", type: "bytes32" },
+  ],
+} as const;
+
+export type Report = {
+  publicationId: bigint;
+  manifestHash: Hex;
+  arweaveBundleTxId: Hex;
+  reportHash: Hex;
+  modelVersion: Hex;
+  promptVersion: Hex;
+  policyId: bigint;
+  score: number;
+  flagged: boolean;
+  aiCost: bigint;
+  jobId: Hex;
+};
+
+/** Mirrors the contract's PublicationState enum. */
+export const State = { Deposited: 0, Flagged: 1, AppealPending: 2, Approved: 3, Published: 4, Rejected: 5 } as const;
+export const Settlement = { None: 0, Rejected: 1, AppealTimeout: 2, ThresholdReached: 3, AuthorRefund: 4 } as const;
+export const Credit = { SaleProceeds: 0, PlatformFee: 1, AiExpense: 2, DepositRefund: 3, OwnerAllocation: 4 } as const;
+export const Path = { Report: 0, Appeal: 1 } as const;
+
 export type Quote = {
   author: Address;
   manifestHash: Hex;
@@ -106,7 +142,7 @@ export const roleId = (name: string) => keccak256(toHex(name));
 
 export async function deployMarket(viem: Viem) {
   const wallets = await viem.getWalletClients();
-  const [admin, owner, aiRecipient, quoteSigner, author, other, pauser, reporter] = wallets;
+  const [admin, owner, aiRecipient, quoteSigner, author, other, pauser, reporter, reviewer] = wallets;
   const publicClient = await viem.getPublicClient();
 
   const market = await viem.deployContract("ConsentCraftMarket", [
@@ -118,10 +154,11 @@ export async function deployMarket(viem: Viem) {
   await market.write.grantRole([roleId("QUOTE_SIGNER_ROLE"), quoteSigner.account.address]);
   await market.write.grantRole([roleId("PAUSER_ROLE"), pauser.account.address]);
   await market.write.grantRole([roleId("REPORTER_ROLE"), reporter.account.address]);
+  await market.write.grantRole([roleId("REVIEWER_ROLE"), reviewer.account.address]);
   await market.write.createPolicy([SAMPLE_POLICY]);
 
   const chainId = await publicClient.getChainId();
-  return { market, publicClient, chainId, admin, owner, aiRecipient, quoteSigner, author, other, pauser, reporter };
+  return { market, publicClient, chainId, admin, owner, aiRecipient, quoteSigner, author, other, pauser, reporter, reviewer };
 }
 
 export function domainFor(chainId: number, verifyingContract: Address) {
@@ -169,4 +206,49 @@ export function sampleQuote(author: Address, now: bigint, overrides: Partial<Quo
 
 export function sampleCertificate(wallet: Address, now: bigint, overrides: Partial<Certificate> = {}): Certificate {
   return { wallet, action: Action.Publish, expiresAt: now + HOUR, nonce: randomNonce(), ...overrides };
+}
+
+export function signReport(signer: WalletClient, chainId: number, market: Address, report: Report) {
+  return signer.signTypedData({
+    account: signer.account,
+    domain: domainFor(chainId, market),
+    types: REPORT_TYPES,
+    primaryType: "ReviewReport",
+    message: report,
+  });
+}
+
+export const randomBytes32 = () => toHex(randomBytes(32));
+
+/** A report matching `quote` for `publicationId`; override fields to tamper. */
+export function sampleReport(publicationId: bigint, quote: Quote, overrides: Partial<Report> = {}): Report {
+  return {
+    publicationId,
+    manifestHash: quote.manifestHash,
+    arweaveBundleTxId: quote.arweaveBundleTxId,
+    reportHash: keccak256(toHex("private review record")),
+    modelVersion: keccak256(toHex("sample-vision-model@1")),
+    promptVersion: keccak256(toHex("review-prompt@1")),
+    policyId: quote.policyId,
+    score: 72,
+    flagged: false,
+    aiCost: parseEther("0.002"),
+    jobId: randomBytes32(),
+    ...overrides,
+  };
+}
+
+type Deployed = Awaited<ReturnType<typeof deployMarket>>;
+
+/** Creates a publication from `f.author` with a valid quote and certificate. Returns its id and quote. */
+export async function createSamplePublication(f: Deployed, now: bigint, overrides: Partial<Quote> = {}) {
+  const quote = sampleQuote(f.author.account.address, now, overrides);
+  const cert = sampleCertificate(f.author.account.address, now);
+  const quoteSig = await signQuote(f.quoteSigner, f.chainId, f.market.address, quote);
+  const certSig = await signCertificate(f.quoteSigner, f.chainId, f.market.address, cert);
+  await f.market.write.createPublication([quote, quoteSig, cert, certSig], {
+    account: f.author.account,
+    value: quote.deposit,
+  });
+  return { id: await f.market.read.publicationCount(), quote };
 }

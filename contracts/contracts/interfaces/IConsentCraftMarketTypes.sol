@@ -38,12 +38,6 @@ interface IConsentCraftMarketTypes {
         AuthorRefund
     }
 
-    /// @notice Outcome carried in a signed ReviewReport.
-    enum ReviewOutcome {
-        Approve,
-        Flag
-    }
-
     /// @notice How an approval was reached.
     enum ApprovalPath {
         Report,
@@ -98,6 +92,8 @@ interface IConsentCraftMarketTypes {
         uint256 aiCap; // wei, aiCap < S
         // review
         uint256 aiCost; // A, recognized once, A <= aiCap
+        bytes32 reportHash; // hash of the private review record from the accepted report
+        uint16 score; // advisory content score from the accepted report; scale defined off chain
         // sales and settlement
         uint256 grossSales; // R, cumulative, includes self-purchases
         uint256 authorRefund; // F, set at settlement
@@ -109,9 +105,10 @@ interface IConsentCraftMarketTypes {
         // timestamps (unix seconds, 0 = not reached)
         uint64 createdAt;
         uint64 reviewedAt;
+        uint64 flaggedAt;
         uint64 appealDeadline;
         uint64 appealedAt;
-        uint64 resolutionDeadline;
+        uint64 appealResolutionDeadline;
         uint64 decidedAt; // final approval or rejection
         uint64 publishedAt;
         uint64 delistedAt;
@@ -148,14 +145,21 @@ interface IConsentCraftMarketTypes {
 
     /// @notice EIP-712 review report signed by a REPORTER_ROLE account after it has
     /// checked the Arweave contents against manifestHash and previewManifestHash.
+    /// Only successful reviews are signed: service errors (timeouts, unsupported models,
+    /// malformed output) never produce a report, so they cannot cause forfeiture.
+    /// @dev All fields are static, so abi.encode(TYPEHASH, report) equals the EIP-712 encodeData.
     struct ReviewReport {
-        bytes32 reportId; // single use
-        uint256 publicationId;
+        uint256 publicationId; // must equal the publicationId argument
         bytes32 manifestHash; // must equal the publication's manifestHash
-        ReviewOutcome outcome;
-        uint256 aiCost; // becomes A; must be <= aiCap
+        bytes32 arweaveBundleTxId; // must equal the publication's arweaveBundleTxId
         bytes32 reportHash; // hash of the private review record
-        uint64 expiresAt;
+        bytes32 modelVersion; // hash or identifier of the model version used
+        bytes32 promptVersion; // hash or identifier of the prompt version used
+        uint256 policyId; // must equal the publication's policyId
+        uint16 score; // advisory content score; scale defined off chain
+        bool flagged;
+        uint256 aiCost; // becomes A; must be <= aiCap
+        bytes32 jobId; // single use across all publications
     }
 
     // ---------------------------------------------------------------------
@@ -197,16 +201,21 @@ interface IConsentCraftMarketTypes {
     );
 
     event ReviewReportSubmitted(
-        uint256 indexed publicationId, bytes32 indexed reportId, ReviewOutcome outcome, uint256 aiCost, bytes32 reportHash
+        uint256 indexed publicationId,
+        bytes32 indexed jobId,
+        bool flagged,
+        uint16 score,
+        uint256 aiCost,
+        bytes32 reportHash,
+        bytes32 modelVersion,
+        bytes32 promptVersion
     );
 
-    event PublicationFlagged(uint256 indexed publicationId, uint64 appealDeadline, bytes32 reportHash);
+    event PublicationFlagged(uint256 indexed publicationId, uint64 flaggedAt, uint64 appealDeadline);
 
-    event AppealFiled(uint256 indexed publicationId, bytes32 appealHash, uint64 resolutionDeadline);
+    event AppealFiled(uint256 indexed publicationId, bytes32 evidenceHash, uint64 appealResolutionDeadline);
 
-    event AppealResolved(
-        uint256 indexed publicationId, address indexed reviewer, bool approved, bytes32 resolutionHash
-    );
+    event AppealResolved(uint256 indexed publicationId, address indexed reviewer, bool approved, bytes32 reasonHash);
 
     event PublicationApproved(uint256 indexed publicationId, ApprovalPath path);
 
@@ -265,9 +274,11 @@ interface IConsentCraftMarketTypes {
     error CertificateActionMismatch(PersonhoodAction expected, PersonhoodAction actual);
 
     error InvalidReportSignature();
-    error ReportExpired(bytes32 reportId);
-    error ReportAlreadyUsed(bytes32 reportId);
+    error ReportPublicationMismatch(uint256 expected, uint256 actual);
+    error ReportJobIdUsed(bytes32 jobId);
     error ReportManifestMismatch(uint256 publicationId);
+    error ReportArweaveTxIdMismatch(uint256 publicationId);
+    error ReportPolicyMismatch(uint256 publicationId, uint256 expected, uint256 actual);
 
     error ZeroManifestHash();
     error ZeroArweaveTxId();

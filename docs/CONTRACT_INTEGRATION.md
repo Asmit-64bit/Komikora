@@ -6,7 +6,7 @@ This guide covers who calls and signs what, and which event each step emits. The
 
 | Actor | Key | Does |
 | --- | --- | --- |
-| Author wallet | User EOA | Calls `createPublication`, `appeal`, `claimAppealTimeout`, `publish`, `refundAndDelist`, `withdraw` |
+| Author wallet | User EOA | Calls `createPublication`, `appeal`, `publish`, `refundAndDelist`, `withdraw`; usually also `claimAppealTimeout`, which anyone may call |
 | Buyer wallet | User EOA | Calls `purchase` and `withdraw` (only if it holds credits) |
 | Backend quote signer | `QUOTE_SIGNER_ROLE` EOA (server-side) | Signs `PublicationQuote` and `PersonhoodCertificate`; never sends transactions |
 | Reporter | `REPORTER_ROLE` EOA (server-side) | Signs `ReviewReport`. Any account, such as a backend relayer, may submit it. |
@@ -25,11 +25,11 @@ This guide covers who calls and signs what, and which event each step emits. The
 | 3 | **Confirm availability.** Fetch both transactions from a gateway, wait for confirmation, and re-hash the fetched bytes to check them against both hashes. Convert both IDs with `arweaveTxIdToBytes32`. | Backend | None | None |
 | 4 | **Sign the quote.** Choose `policyId`, a `price` within `[minPrice, maxPrice]` (and the report's backend price ceiling), `deposit` and `aiCap` with `deposit > aiCap`, and the author's `ratingSnapshot`. Set a random 256-bit `nonce` and a short `expiresAt`, then sign `PublicationQuote` for the author's address. After World ID verification, also sign a single-use `PersonhoodCertificate` (`wallet` = author, `action` = 0 PUBLISH, random `nonce`, short `expiresAt`). Persist both nonces. | Backend quote signer | None | None |
 | 5 | **Author calls `createPublication(quote, quoteSig, cert, certSig)`** with `msg.value = deposit`. | Author | Deposited, Unlisted | `PublicationCreated` (implies Deposited) |
-| 6 | **Review.** The reporter checks the Arweave contents against both hashes, runs the review, and signs a `ReviewReport` with `outcome`, `aiCost <= aiCap` and `reportHash`. Anyone submits `submitReviewReport(report, sig)`. | Reporter, then relayer | Approved or Flagged; `A` credited | `ReviewReportSubmitted`, `Credited(AiExpense)`, `ReviewStatusChanged`, then `PublicationApproved(Report)` or `PublicationFlagged` |
-| 6a | If flagged, the author may call `appeal(id, appealHash)` while `now < appealDeadline`. | Author | AppealPending | `AppealFiled`, `ReviewStatusChanged` |
-| 6b | The reviewer calls `resolveAppeal(id, approve, resolutionHash)` while `now < resolutionDeadline`. | Reviewer | Approved, or Rejected and settled | `AppealResolved`, `ReviewStatusChanged`, then `PublicationApproved(Appeal)` or `PublicationRejected(Rejected)`, `DepositSettled`, `Credited` |
+| 6 | **Review.** The reporter checks the Arweave contents against both hashes and runs the review. Only on success does it sign a `ReviewReport` with the publication's `manifestHash`, `arweaveBundleTxId` and `policyId`, plus `reportHash`, `modelVersion`, `promptVersion`, `score`, `flagged`, `aiCost <= aiCap` and a unique `jobId`. Service errors produce no report. Anyone submits `submitReviewReport(id, report, sig)`. | Reporter, then relayer | Approved or Flagged; A credited | `Credited(AiExpense)` if A > 0, `ReviewReportSubmitted`, `ReviewStatusChanged`, then `PublicationApproved(Report)` or `PublicationFlagged` |
+| 6a | If flagged, the author may call `appeal(id, evidenceHash)` while `now < appealDeadline`. | Author | AppealPending | `AppealFiled`, `ReviewStatusChanged` |
+| 6b | The reviewer calls `resolveAppeal(id, approved, reasonHash)` while `now < appealResolutionDeadline`. | Reviewer | Approved, or Rejected and settled | `AppealResolved`, `ReviewStatusChanged`, then `PublicationApproved(Appeal)` or `PublicationRejected(Rejected)`, `DepositSettled`, `Credited` |
 | 6c | If there is no appeal, anyone calls `finalizeRejection(id)` once `now >= appealDeadline`. Remainder `S - A` goes to the owner. | Anyone | Rejected and settled | `ReviewStatusChanged`, `PublicationRejected(Rejected)`, `DepositSettled`, `Credited` |
-| 6d | If the appeal goes unresolved, the author calls `claimAppealTimeout(id)` once `now >= resolutionDeadline`. Refund `S - A` (pending approval). | Author | Rejected and settled | `ReviewStatusChanged`, `PublicationRejected(AppealTimeout)`, `DepositSettled`, `Credited` |
+| 6d | If the appeal goes unresolved, anyone calls `claimAppealTimeout(id)` once `now >= appealResolutionDeadline`. The author is credited `S - A` (pending approval). | Anyone | Rejected and settled | `ReviewStatusChanged`, `PublicationRejected(AppealTimeout)`, `DepositSettled`, `Credited` |
 | 7 | **Publish.** The author calls `publish(id)`. | Author | Published, Listed | `ReviewStatusChanged`, `PublicationPublished` |
 | 8 | **Index to Arkiv.** The indexer turns events into Arkiv listing and trade entities (see below). | Indexer | None | None |
 

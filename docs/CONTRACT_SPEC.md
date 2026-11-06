@@ -16,7 +16,8 @@ Items marked **[OPEN]** are provisional defaults that still need a decision; see
 | Policies (`createPolicy`, `getPolicy`, `policyCount`) | Implemented |
 | `createPublication`, quote and certificate verification | Implemented |
 | Liability views (`totalCredits`, `totalLockedDeposits`, `totalLiabilities`, `liabilitiesCovered`), direct-ETH rejection | Implemented |
-| Review, appeals, publish, purchase, refund, withdraw, `hasReadingAccess`, `saleFee`, `previewSettlement` | Not yet implemented |
+| `submitReviewReport`, `appeal`, `resolveAppeal`, `finalizeRejection`, `claimAppealTimeout`, Rejected/AppealTimeout settlement, credits | Implemented |
+| Publish, purchase, refund, withdraw, `hasReadingAccess`, `saleFee`, `previewSettlement` | Not yet implemented |
 
 Until every function exists, the contract inherits `IConsentCraftMarketTypes` rather than `IConsentCraftMarket`, so it has no stub functions.
 
@@ -125,14 +126,15 @@ Any other combination reverts with `InvalidPolicy`. The report's richer price ce
 | Group | Fields |
 | --- | --- |
 | Frozen (from the quote) | `author`, `policyId`, `manifestHash`, `previewManifestHash`, `arweaveBundleTxId`, `arweavePreviewTxId`, `pageCount`, `ratingSnapshot`, `price`, `deposit` (S), `aiCap` |
-| Review | `aiCost` (A) |
+| Review | `aiCost` (A), `reportHash`, `score` |
 | Money | `grossSales` (R), `authorRefund` (F), `ownerAllocation` (O) |
 | States | `state` (review), `listingState`, `settlementReason` |
-| Timestamps | `createdAt`, `reviewedAt`, `appealDeadline`, `appealedAt`, `resolutionDeadline`, `decidedAt`, `publishedAt`, `delistedAt`, `settledAt` |
+| Timestamps | `createdAt`, `reviewedAt`, `flaggedAt`, `appealDeadline`, `appealedAt`, `appealResolutionDeadline`, `decidedAt`, `publishedAt`, `delistedAt`, `settledAt` |
 
 - Publication ids are sequential from 1. A new version of a comic is a new publication.
 - The Arweave IDs are stored as `bytes32`: the 32 raw bytes of the 43-character Base64URL ID (section 10). Both must be non-zero and can never change.
 - `arweaveBundleTxId` points to encrypted full pages. `arweavePreviewTxId` points to a public preview manifest holding the title, description, language, genre and preview image references. `previewManifestHash` hashes that manifest's canonical bytes, and `manifestHash` hashes the canonical bundle manifest. Both are `keccak256` **[OPEN Q4]**.
+- `aiCost`, `reportHash`, `score`, `reviewedAt` and (if flagged) `flaggedAt` come from the single accepted review report. The model and prompt versions are emitted in `ReviewReportSubmitted` but not stored.
 - `ratingSnapshot` is the author-rating snapshot frozen into the quote (report §7, items 12 and 15). It is a `uint8` whose scale is defined off chain.
 
 ## 7. State machines
@@ -147,7 +149,7 @@ Review state, listing state and settlement reason are separate fields. A publish
   Flagged ──appeal (< appealDeadline)──► AppealPending ───┘
      │                                     │      │
      │ finalizeRejection                   │      │ claimAppealTimeout
-     │ (>= appealDeadline)                 │      │ (>= resolutionDeadline)
+     │ (>= appealDeadline)                 │      │ (>= appealResolutionDeadline)
      ▼                                     ▼      ▼
   Rejected (reason Rejected) ◄─resolveAppeal(reject)   Rejected (reason AppealTimeout)
 ```
@@ -160,17 +162,32 @@ Time boundaries follow the report:
 | Function | Caller | Precondition | Effect | Paused? |
 | --- | --- | --- | --- | --- |
 | `createPublication` | Author | See section 8 | Deposited, Unlisted; `totalLockedDeposits += S` | **Blocked** |
-| `submitReviewReport` | Anyone (relayer) | Deposited; valid unused report; `manifestHash` matches; `aiCost <= aiCap` | Sets A and `reviewedAt`; credits A; Approved, or Flagged with `appealDeadline = now + appealDuration` | Allowed |
-| `appeal` | Author | Flagged, `now < appealDeadline` | AppealPending, `resolutionDeadline = now + appealResolutionDuration` | Allowed |
-| `resolveAppeal` | `REVIEWER_ROLE` | AppealPending, `now < resolutionDeadline` | Approved, or Rejected and settled (`Rejected`) | Allowed |
-| `finalizeRejection` | Anyone | Flagged, `now >= appealDeadline` | Rejected and settled (`Rejected`) | Allowed |
-| `claimAppealTimeout` | Author | AppealPending, `now >= resolutionDeadline` | Rejected and settled (`AppealTimeout`) | Allowed |
+| `submitReviewReport(id, report, sig)` | Anyone (relayer) | See "Review reports" below | Sets A, `reportHash`, `score`, `reviewedAt`; locked −= A; credits A to the AI expense recipient; Approved (`decidedAt`), or Flagged with `flaggedAt` and `appealDeadline = now + appealDuration` | Allowed |
+| `appeal(id, evidenceHash)` | Author | Flagged, `now < appealDeadline` | AppealPending, `appealedAt`, `appealResolutionDeadline = now + appealResolutionDuration` | Allowed |
+| `resolveAppeal(id, approved, reasonHash)` | `REVIEWER_ROLE` | AppealPending, `now < appealResolutionDeadline` | Approved, or Rejected and settled (`Rejected`: owner gets S − A) | Allowed |
+| `finalizeRejection(id)` | Anyone | Flagged, `now >= appealDeadline` | Rejected and settled (`Rejected`: owner gets S − A) | Allowed |
+| `claimAppealTimeout(id)` | Anyone | AppealPending, `now >= appealResolutionDeadline` | Rejected and settled (`AppealTimeout`: author gets S − A) | Allowed |
 | `publish` | Author | Approved, Unlisted | Published, Listed, `publishedAt` | Allowed |
 | `purchase` | Buyer | Published and Listed; `msg.value == price`; unused `requestId`; buyer not entitled; valid Purchase certificate if the policy requires one | Entitlement; `R += P`; fee and proceeds credited; if the deposit is unsettled and `R >= S`, settles (`ThresholdReached`) | **Blocked** |
 | `refundAndDelist(id, minRefund)` | Author | Published and Listed; `now >= publishedAt + refundDelay`; `R < S`; deposit unsettled; `F >= minRefund` | Delisted, settles (`AuthorRefund`) | Allowed |
 | `withdraw` | Credit holder | Credit > 0 | Sends the full credit (`nonReentrant`, checks-effects-interactions) | Allowed |
 
 Pausing blocks only new deposits and purchases. Review, appeals, publishing, refunds and withdrawals keep working, so pausing never traps funds or makes a deadline pass unfairly. Deadlines keep running while the contract is paused.
+
+### Review reports
+
+`submitReviewReport` checks the following in order and reverts on the first failure:
+1. The publication exists (`UnknownPublication`)
+2. `report.publicationId` equals the argument (`ReportPublicationMismatch`)
+3. The state is Deposited (`InvalidPublicationState`)
+4. `jobId` is unused across all publications (`ReportJobIdUsed`)
+5. The signer holds `REPORTER_ROLE` (`InvalidReportSignature`)
+6. `manifestHash` matches (`ReportManifestMismatch`), `arweaveBundleTxId` matches (`ReportArweaveTxIdMismatch`), and `policyId` matches (`ReportPolicyMismatch`)
+7. `aiCost <= aiCap` (`AiCostExceedsCap`)
+
+A is recognized exactly once, because only Deposited accepts a report and acceptance always leaves Deposited. A zero A creates no credit and emits no `Credited`. Reports carry no expiry: the single-use `jobId` and the Deposited-only rule bound replay.
+
+Service errors (timeouts, unsupported models, malformed output) never produce a signed report, so they never reach the contract. The publication stays Deposited with S locked, and no function can forfeit it. The exit for this case is still open (**Q3**).
 
 There is no automatic refund or forfeiture when time passes. Delisting without a refund, and delisting before `refundDelay`, are not supported. The report says not to add them silently.
 
@@ -190,14 +207,14 @@ PublicationQuote(address author,bytes32 manifestHash,bytes32 previewManifestHash
 
 PersonhoodCertificate(address wallet,uint8 action,uint64 expiresAt,uint256 nonce)      action: 0 = PUBLISH, 1 = PURCHASE
 
-ReviewReport(bytes32 reportId,uint256 publicationId,bytes32 manifestHash,uint8 outcome,uint256 aiCost,bytes32 reportHash,uint64 expiresAt)
+ReviewReport(uint256 publicationId,bytes32 manifestHash,bytes32 arweaveBundleTxId,bytes32 reportHash,bytes32 modelVersion,bytes32 promptVersion,uint256 policyId,uint16 score,bool flagged,uint256 aiCost,bytes32 jobId)
 ```
 
 | Type | Signer | Replay protection |
 | --- | --- | --- |
 | PublicationQuote | `QUOTE_SIGNER_ROLE` | `nonce` single use (global quote-nonce set), plus domain and expiry |
 | PersonhoodCertificate | `QUOTE_SIGNER_ROLE` | `nonce` single use (global certificate-nonce set), bound to wallet and action, plus domain and expiry |
-| ReviewReport | `REPORTER_ROLE` | `reportId` single use; a publication accepts one report |
+| ReviewReport | `REPORTER_ROLE` | `jobId` single use (global); a publication accepts one report, only while Deposited |
 
 The backend should draw nonces at random as 256-bit values. Nonces are consumed only when a call succeeds, so a reverted transaction can be retried with the same signatures.
 
@@ -226,7 +243,11 @@ Every state change emits an event. Together they let an indexer rebuild the mark
 | `OwnerRecipientUpdated`, `AiExpenseRecipientUpdated` | Constructor (previous recipient is zero) and the setters |
 | `PublicationCreated` (id, author, policyId, manifestHash, previewManifestHash, both Arweave IDs, pageCount, price, deposit, aiCap) | `createPublication`; implies Deposited and Unlisted |
 | `ReviewStatusChanged` | Every review-state transition after creation |
-| `ReviewReportSubmitted`, `PublicationFlagged`, `AppealFiled`, `AppealResolved`, `PublicationApproved`, `PublicationRejected` | Review and appeal steps |
+| `ReviewReportSubmitted` (jobId, flagged, score, aiCost, reportHash, modelVersion, promptVersion) | `submitReviewReport` |
+| `PublicationFlagged` (flaggedAt, appealDeadline) | Flagged report |
+| `AppealFiled` (evidenceHash, appealResolutionDeadline) | `appeal` |
+| `AppealResolved` (reviewer, approved, reasonHash) | `resolveAppeal` |
+| `PublicationApproved` (path Report or Appeal), `PublicationRejected` (reason) | Approval and rejection |
 | `PublicationPublished` (price, `refundEligibleAt`) | `publish` |
 | `PublicationDelisted` | `refundAndDelist` |
 | `Purchased` (id, buyer, requestId, price, platformFee, authorProceeds, cumulativeGrossSales) | `purchase` |
@@ -267,7 +288,8 @@ According to the [Arweave HTTP API docs](https://docs.arweave.org/developers/arw
 
 ## 13. Open questions
 
-- **Q1:** AppealTimeout returns `S - A`. The report recommends this but says it needs product approval.
+- **Q1:** AppealTimeout returns `S - A` to the author. Anyone may trigger it. The report recommends this but says it needs product approval, and the contract comments say so too.
+- **Q6:** `score` is a `uint16` with no on-chain range check. Its scale is defined off chain.
 - **Q2:** The personhood certificate is single use and covers one action. Should a buyer get a fresh certificate for every purchase? The report implies short-lived certificates.
 - **Q3:** There is no exit when the review never completes, so S stays locked. The report lists "service failure exit" as an undecided launch decision.
 - **Q4:** Are the manifest hashes `keccak256`, or SHA-256?

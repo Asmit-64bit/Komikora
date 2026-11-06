@@ -45,18 +45,23 @@ interface IConsentCraftMarket is IConsentCraftMarketTypes {
     ) external payable returns (uint256 publicationId);
 
     /// @notice Anyone may relay a REPORTER_ROLE-signed report for a Deposited publication.
-    function submitReviewReport(ReviewReport calldata report, bytes calldata signature) external;
+    /// Recognizes A once and credits it to the AI expense recipient.
+    function submitReviewReport(uint256 publicationId, ReviewReport calldata report, bytes calldata signature)
+        external;
 
     /// @notice Author appeals a Flagged publication strictly before appealDeadline.
-    function appeal(uint256 publicationId, bytes32 appealHash) external;
+    function appeal(uint256 publicationId, bytes32 evidenceHash) external;
 
-    /// @notice REVIEWER_ROLE resolves an appeal strictly before resolutionDeadline.
-    function resolveAppeal(uint256 publicationId, bool approve, bytes32 resolutionHash) external;
+    /// @notice REVIEWER_ROLE resolves an appeal strictly before appealResolutionDeadline.
+    /// Rejection settles the deposit with reason Rejected (S - A to the owner).
+    function resolveAppeal(uint256 publicationId, bool approved, bytes32 reasonHash) external;
 
     /// @notice Anyone, at or after appealDeadline, for a Flagged publication that was not appealed.
+    /// Settles with reason Rejected (S - A to the owner).
     function finalizeRejection(uint256 publicationId) external;
 
-    /// @notice Author, at or after resolutionDeadline, for an unresolved appeal.
+    /// @notice Anyone, at or after appealResolutionDeadline, for an unresolved appeal.
+    /// Settles with reason AppealTimeout (S - A to the author; pending product approval).
     function claimAppealTimeout(uint256 publicationId) external;
 
     /// @notice Author lists an Approved publication.
@@ -112,7 +117,7 @@ interface IConsentCraftMarket is IConsentCraftMarketTypes {
 
     function isCertificateNonceUsed(uint256 nonce) external view returns (bool);
 
-    function isReportUsed(bytes32 reportId) external view returns (bool);
+    function isJobIdUsed(bytes32 jobId) external view returns (bool);
 
     function isRequestIdUsed(bytes32 requestId) external view returns (bool);
 

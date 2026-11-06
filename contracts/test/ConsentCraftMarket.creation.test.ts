@@ -116,14 +116,19 @@ describe("ConsentCraftMarket: policies, roles and publication creation", () => {
         .map((x) => (x as { name: string }).name)
         .sort();
       assert.deepEqual(mutating, [
+        "appeal",
+        "claimAppealTimeout",
         "createPolicy",
         "createPublication",
+        "finalizeRejection",
         "grantRole",
         "pause",
         "renounceRole",
+        "resolveAppeal",
         "revokeRole",
         "setAiExpenseRecipient",
         "setOwnerRecipient",
+        "submitReviewReport",
         "unpause",
       ]);
     });

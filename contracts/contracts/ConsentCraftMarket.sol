@@ -11,8 +11,9 @@ import {IConsentCraftMarketTypes} from "./interfaces/IConsentCraftMarketTypes.so
 /// @title ConsentCraftMarket
 /// @notice Contract layer for the ConsentCraft paid comic marketplace on Sepolia.
 /// @dev Implementation status: policies, roles, recipients, pausing, liability
-/// accounting and publication creation. Review, appeals, publishing, purchases,
-/// settlement and withdrawals are not implemented yet; see docs/CONTRACT_SPEC.md.
+/// accounting, publication creation, review reports, appeals and rejection/timeout
+/// settlement. Publishing, purchases, refunds and withdrawals are not implemented
+/// yet; see docs/CONTRACT_SPEC.md.
 /// Once they are, this contract inherits IConsentCraftMarket instead of the types-only base.
 contract ConsentCraftMarket is IConsentCraftMarketTypes, AccessControl, Pausable, EIP712 {
     // ---------------------------------------------------------------------
@@ -30,6 +31,10 @@ contract ConsentCraftMarket is IConsentCraftMarketTypes, AccessControl, Pausable
 
     bytes32 public constant PERSONHOOD_CERTIFICATE_TYPEHASH =
         keccak256("PersonhoodCertificate(address wallet,uint8 action,uint64 expiresAt,uint256 nonce)");
+
+    bytes32 public constant REVIEW_REPORT_TYPEHASH = keccak256(
+        "ReviewReport(uint256 publicationId,bytes32 manifestHash,bytes32 arweaveBundleTxId,bytes32 reportHash,bytes32 modelVersion,bytes32 promptVersion,uint256 policyId,uint16 score,bool flagged,uint256 aiCost,bytes32 jobId)"
+    );
 
     uint16 private constant MAX_BPS = 10_000;
 
@@ -53,6 +58,7 @@ contract ConsentCraftMarket is IConsentCraftMarketTypes, AccessControl, Pausable
     mapping(address account => uint256) private _credits;
     mapping(uint256 nonce => bool) private _quoteNonceUsed;
     mapping(uint256 nonce => bool) private _certificateNonceUsed;
+    mapping(bytes32 jobId => bool) private _jobIdUsed;
 
     // ---------------------------------------------------------------------
     // Construction and direct-payment rejection
@@ -144,8 +150,11 @@ contract ConsentCraftMarket is IConsentCraftMarketTypes, AccessControl, Pausable
         if (quote.author != msg.sender) revert QuoteAuthorMismatch(quote.author, msg.sender);
         if (block.timestamp > quote.expiresAt) revert QuoteExpired(quote.expiresAt);
         if (_quoteNonceUsed[quote.nonce]) revert QuoteNonceUsed(quote.nonce);
-        if (!_isQuoteSigner(_hashTypedDataV4(keccak256(abi.encode(PUBLICATION_QUOTE_TYPEHASH, quote))), quoteSignature))
-        {
+        if (
+            !_hasRoleSignature(
+                QUOTE_SIGNER_ROLE, _hashTypedDataV4(keccak256(abi.encode(PUBLICATION_QUOTE_TYPEHASH, quote))), quoteSignature
+            )
+        ) {
             revert InvalidQuoteSignature();
         }
 
@@ -189,6 +198,120 @@ contract ConsentCraftMarket is IConsentCraftMarketTypes, AccessControl, Pausable
     }
 
     // ---------------------------------------------------------------------
+    // Review and appeals
+    // ---------------------------------------------------------------------
+    // None of these are pausable: pausing blocks only new deposits and purchases,
+    // so it can never strand a publication mid-review or let a deadline pass unfairly.
+
+    /// @notice Relays a REPORTER_ROLE-signed review report. Anyone may call.
+    /// @dev A is recognized here exactly once: only a Deposited publication accepts a
+    /// report and acceptance always leaves Deposited. Service errors never produce a
+    /// signed report, so they leave the publication Deposited with no forfeiture.
+    function submitReviewReport(uint256 publicationId, ReviewReport calldata report, bytes calldata signature)
+        external
+    {
+        Publication storage p = _existing(publicationId);
+        if (report.publicationId != publicationId) revert ReportPublicationMismatch(publicationId, report.publicationId);
+        _requireState(publicationId, p, PublicationState.Deposited);
+        if (_jobIdUsed[report.jobId]) revert ReportJobIdUsed(report.jobId);
+        if (!_hasRoleSignature(REPORTER_ROLE, _hashTypedDataV4(keccak256(abi.encode(REVIEW_REPORT_TYPEHASH, report))), signature)) {
+            revert InvalidReportSignature();
+        }
+        if (report.manifestHash != p.manifestHash) revert ReportManifestMismatch(publicationId);
+        if (report.arweaveBundleTxId != p.arweaveBundleTxId) revert ReportArweaveTxIdMismatch(publicationId);
+        if (report.policyId != p.policyId) revert ReportPolicyMismatch(publicationId, p.policyId, report.policyId);
+        if (report.aiCost > p.aiCap) revert AiCostExceedsCap(report.aiCost, p.aiCap);
+
+        _jobIdUsed[report.jobId] = true;
+        uint64 nowTs = uint64(block.timestamp);
+        p.aiCost = report.aiCost;
+        p.reportHash = report.reportHash;
+        p.score = report.score;
+        p.reviewedAt = nowTs;
+
+        // Recognize A once: move it from locked deposits to the AI expense recipient's credit.
+        totalLockedDeposits -= report.aiCost;
+        _credit(aiExpenseRecipient, publicationId, CreditKind.AiExpense, report.aiCost);
+
+        emit ReviewReportSubmitted(
+            publicationId,
+            report.jobId,
+            report.flagged,
+            report.score,
+            report.aiCost,
+            report.reportHash,
+            report.modelVersion,
+            report.promptVersion
+        );
+
+        if (report.flagged) {
+            p.flaggedAt = nowTs;
+            p.appealDeadline = nowTs + _policies[p.policyId].appealDuration;
+            _setState(publicationId, p, PublicationState.Flagged);
+            emit PublicationFlagged(publicationId, nowTs, p.appealDeadline);
+        } else {
+            _approve(publicationId, p, ApprovalPath.Report);
+        }
+    }
+
+    /// @notice Author appeals a flag strictly before appealDeadline.
+    function appeal(uint256 publicationId, bytes32 evidenceHash) external {
+        Publication storage p = _existing(publicationId);
+        if (msg.sender != p.author) revert NotAuthor(publicationId, msg.sender);
+        _requireState(publicationId, p, PublicationState.Flagged);
+        if (block.timestamp >= p.appealDeadline) revert AppealWindowClosed(publicationId, p.appealDeadline);
+
+        uint64 nowTs = uint64(block.timestamp);
+        p.appealedAt = nowTs;
+        p.appealResolutionDeadline = nowTs + _policies[p.policyId].appealResolutionDuration;
+        _setState(publicationId, p, PublicationState.AppealPending);
+        emit AppealFiled(publicationId, evidenceHash, p.appealResolutionDeadline);
+    }
+
+    /// @notice REVIEWER_ROLE decides an appeal strictly before appealResolutionDeadline.
+    /// Upholding the rejection forfeits S - A to the owner (report: confirmed rule).
+    function resolveAppeal(uint256 publicationId, bool approved, bytes32 reasonHash)
+        external
+        onlyRole(REVIEWER_ROLE)
+    {
+        Publication storage p = _existing(publicationId);
+        _requireState(publicationId, p, PublicationState.AppealPending);
+        if (block.timestamp >= p.appealResolutionDeadline) {
+            revert ResolutionWindowClosed(publicationId, p.appealResolutionDeadline);
+        }
+
+        emit AppealResolved(publicationId, msg.sender, approved, reasonHash);
+        if (approved) {
+            _approve(publicationId, p, ApprovalPath.Appeal);
+        } else {
+            _reject(publicationId, p, SettlementReason.Rejected);
+        }
+    }
+
+    /// @notice Anyone may finalize an unappealed flag at or after appealDeadline.
+    /// Forfeits S - A to the owner (report: confirmed rule).
+    function finalizeRejection(uint256 publicationId) external {
+        Publication storage p = _existing(publicationId);
+        _requireState(publicationId, p, PublicationState.Flagged);
+        if (block.timestamp < p.appealDeadline) revert AppealWindowOpen(publicationId, p.appealDeadline);
+        _reject(publicationId, p, SettlementReason.Rejected);
+    }
+
+    /// @notice Anyone may claim the timeout fallback at or after appealResolutionDeadline.
+    /// @dev PRODUCT APPROVAL NEEDED: returning S - A to the author when the platform
+    /// fails to decide in time is the report's *recommended* fallback, not a confirmed
+    /// rule (report §8 item 31, §12 "Missed appeal resolution"). Change before any
+    /// real-value deployment if product decides otherwise.
+    function claimAppealTimeout(uint256 publicationId) external {
+        Publication storage p = _existing(publicationId);
+        _requireState(publicationId, p, PublicationState.AppealPending);
+        if (block.timestamp < p.appealResolutionDeadline) {
+            revert ResolutionWindowOpen(publicationId, p.appealResolutionDeadline);
+        }
+        _reject(publicationId, p, SettlementReason.AppealTimeout);
+    }
+
+    // ---------------------------------------------------------------------
     // Views
     // ---------------------------------------------------------------------
 
@@ -198,8 +321,7 @@ contract ConsentCraftMarket is IConsentCraftMarketTypes, AccessControl, Pausable
     }
 
     function getPublication(uint256 publicationId) external view returns (Publication memory) {
-        if (publicationId == 0 || publicationId > publicationCount) revert UnknownPublication(publicationId);
-        return _publications[publicationId];
+        return _existing(publicationId);
     }
 
     function creditOf(address account) external view returns (uint256) {
@@ -220,6 +342,10 @@ contract ConsentCraftMarket is IConsentCraftMarketTypes, AccessControl, Pausable
 
     function isCertificateNonceUsed(uint256 nonce) external view returns (bool) {
         return _certificateNonceUsed[nonce];
+    }
+
+    function isJobIdUsed(bytes32 jobId) external view returns (bool) {
+        return _jobIdUsed[jobId];
     }
 
     // ---------------------------------------------------------------------
@@ -254,14 +380,78 @@ contract ConsentCraftMarket is IConsentCraftMarketTypes, AccessControl, Pausable
         if (block.timestamp > certificate.expiresAt) revert CertificateExpired(certificate.expiresAt);
         if (_certificateNonceUsed[certificate.nonce]) revert CertificateNonceUsed(certificate.nonce);
         bytes32 digest = _hashTypedDataV4(keccak256(abi.encode(PERSONHOOD_CERTIFICATE_TYPEHASH, certificate)));
-        if (!_isQuoteSigner(digest, signature)) revert InvalidCertificateSignature();
+        if (!_hasRoleSignature(QUOTE_SIGNER_ROLE, digest, signature)) revert InvalidCertificateSignature();
         _certificateNonceUsed[certificate.nonce] = true;
     }
 
-    /// @dev True when `signature` over `digest` recovers to a current QUOTE_SIGNER_ROLE holder.
+    /// @dev True when `signature` over `digest` recovers to a current holder of `role`.
     /// Malformed signatures return false instead of bubbling an ECDSA error.
-    function _isQuoteSigner(bytes32 digest, bytes calldata signature) internal view returns (bool) {
+    function _hasRoleSignature(bytes32 role, bytes32 digest, bytes calldata signature) internal view returns (bool) {
         (address signer, ECDSA.RecoverError err,) = ECDSA.tryRecover(digest, signature);
-        return err == ECDSA.RecoverError.NoError && hasRole(QUOTE_SIGNER_ROLE, signer);
+        return err == ECDSA.RecoverError.NoError && hasRole(role, signer);
+    }
+
+    function _existing(uint256 publicationId) private view returns (Publication storage) {
+        if (publicationId == 0 || publicationId > publicationCount) revert UnknownPublication(publicationId);
+        return _publications[publicationId];
+    }
+
+    function _requireState(uint256 publicationId, Publication storage p, PublicationState expected) private view {
+        if (p.state != expected) revert InvalidPublicationState(publicationId, p.state);
+    }
+
+    function _setState(uint256 publicationId, Publication storage p, PublicationState next) private {
+        emit ReviewStatusChanged(publicationId, p.state, next);
+        p.state = next;
+    }
+
+    function _approve(uint256 publicationId, Publication storage p, ApprovalPath path) private {
+        p.decidedAt = uint64(block.timestamp);
+        _setState(publicationId, p, PublicationState.Approved);
+        emit PublicationApproved(publicationId, path);
+    }
+
+    /// @dev Final rejection. Rejected: F = 0, O = S - A. AppealTimeout: F = S - A, O = 0.
+    function _reject(uint256 publicationId, Publication storage p, SettlementReason reason) private {
+        p.decidedAt = uint64(block.timestamp);
+        _setState(publicationId, p, PublicationState.Rejected);
+        emit PublicationRejected(publicationId, reason);
+
+        uint256 remainder = p.deposit - p.aiCost;
+        if (reason == SettlementReason.AppealTimeout) {
+            _settle(publicationId, p, reason, remainder, 0);
+        } else {
+            _settle(publicationId, p, reason, 0, remainder);
+        }
+    }
+
+    /// @dev Settles the deposit exactly once. Requires F + O == S - A (A already credited).
+    function _settle(
+        uint256 publicationId,
+        Publication storage p,
+        SettlementReason reason,
+        uint256 authorRefund,
+        uint256 ownerAllocation
+    ) private {
+        if (p.settlementReason != SettlementReason.None) revert DepositAlreadySettled(publicationId, p.settlementReason);
+        assert(p.aiCost + authorRefund + ownerAllocation == p.deposit);
+
+        p.settlementReason = reason;
+        p.authorRefund = authorRefund;
+        p.ownerAllocation = ownerAllocation;
+        p.settledAt = uint64(block.timestamp);
+        totalLockedDeposits -= authorRefund + ownerAllocation;
+
+        _credit(p.author, publicationId, CreditKind.DepositRefund, authorRefund);
+        _credit(ownerRecipient, publicationId, CreditKind.OwnerAllocation, ownerAllocation);
+        emit DepositSettled(publicationId, reason, p.deposit, p.aiCost, authorRefund, ownerAllocation, p.grossSales);
+    }
+
+    /// @dev Adds a withdrawable credit. Zero amounts are skipped and emit nothing.
+    function _credit(address account, uint256 publicationId, CreditKind kind, uint256 amount) private {
+        if (amount == 0) return;
+        _credits[account] += amount;
+        totalCredits += amount;
+        emit Credited(account, publicationId, kind, amount);
     }
 }
