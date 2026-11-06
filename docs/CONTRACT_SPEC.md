@@ -1,11 +1,24 @@
 # ConsentCraftMarket contract specification
 
-Status: interface defined, business logic not implemented.
-Interface: [contracts/contracts/interfaces/IConsentCraftMarket.sol](../contracts/contracts/interfaces/IConsentCraftMarket.sol)
+Interface: [IConsentCraftMarket.sol](../contracts/contracts/interfaces/IConsentCraftMarket.sol) (functions) extends [IConsentCraftMarketTypes.sol](../contracts/contracts/interfaces/IConsentCraftMarketTypes.sol) (enums, structs, events, errors).
+Implementation: [ConsentCraftMarket.sol](../contracts/contracts/ConsentCraftMarket.sol)
+Product source: ConsentCraft Final Project Report (6 November 2026), referred to below as "the report".
 
-One integrated Solidity contract on Sepolia holds deposits and sale payments in native ETH (wei) and is the only authority for deposits, sales, entitlements, settlements and withdrawals. It is built with Solidity 0.8.28 and OpenZeppelin Contracts 5.6.1 (`AccessControl`, `Pausable`, `ReentrancyGuard`, `EIP712`, `ECDSA`).
+One integrated Solidity contract on Sepolia holds deposits and sale payments in native ETH (wei). It is the only authority for deposits, sales, entitlements, settlements and withdrawals. It is built with Solidity 0.8.28 and OpenZeppelin Contracts 5.6.1 (`AccessControl`, `Pausable`, `EIP712`, `ECDSA`; `ReentrancyGuard` arrives with the first ETH-sending function).
 
-Items marked **[OPEN]** are provisional defaults that still need a decision; see the last section.
+Items marked **[OPEN]** are provisional defaults that still need a decision; see section 13.
+
+## Implementation status
+
+| Area | Status |
+| --- | --- |
+| Roles, recipients, pausing | Implemented |
+| Policies (`createPolicy`, `getPolicy`, `policyCount`) | Implemented |
+| `createPublication`, quote and certificate verification | Implemented |
+| Liability views (`totalCredits`, `totalLockedDeposits`, `totalLiabilities`, `liabilitiesCovered`), direct-ETH rejection | Implemented |
+| Review, appeals, publish, purchase, refund, withdraw, `hasReadingAccess`, `saleFee`, `previewSettlement` | Not yet implemented |
+
+Until every function exists, the contract inherits `IConsentCraftMarketTypes` rather than `IConsentCraftMarket`, so it has no stub functions.
 
 ## 1. System boundaries
 
@@ -18,7 +31,7 @@ Items marked **[OPEN]** are provisional defaults that still need a decision; see
 
 The contract cannot verify Arweave contents or availability. Before signing a quote, the backend confirms that both transactions are available and match `manifestHash` and `previewManifestHash`. The reporter checks them again before signing a review report.
 
-Keys and plaintext paid pages are never placed on Arweave, on Arkiv, in calldata or in events.
+Keys and plaintext paid pages are never placed on Arweave, on Arkiv, in calldata or in events. Personhood certificates are a trusted attestation bridge from the backend's World ID check. They are not on-chain World ID verification.
 
 ## 2. Symbols and formulas
 
@@ -26,29 +39,37 @@ Keys and plaintext paid pages are never placed on Arweave, on Arkiv, in calldata
 | --- | --- |
 | `S` | Deposit. Immutable, `msg.value` at creation, and strictly greater than `aiCap`. |
 | `R` | Cumulative gross sales in wei, including self-purchases. |
-| `A` | Recognized AI cost. Set once, from the first review report, with `A <= aiCap < S`. |
-| `Q` | `ceil(S / 4)` = `(S + 3) / 4` in integer arithmetic. |
+| `A` | Recognized AI cost. Set once, from the review report, with `A <= aiCap < S`. |
+| `Q` | `ceil(S / 4)`, computed as `S / 4 + (S % 4 == 0 ? 0 : 1)`. |
 | `D` | Retained deposit: `min(S, max(R, A, Q))`. |
 | `F` | Author refund: `S - D`. |
 | `O` | Additional owner allocation: `D - A`. |
 
-Settlement invariant: `S = A + F + O`. It holds because `A <= D <= S`; `D >= A` follows from `max(R, A, Q) >= A` and `S > aiCap >= A`.
+Invariant at every settlement: `S = A + F + O`.
 
-The settlement formula uses the values of `R` and `A` at the moment of settlement. For Rejected and AppealTimeout, `R = 0` because nothing can have been sold. **[OPEN Q1]**
+| Settlement reason | When | F | O |
+| --- | --- | --- | --- |
+| `AuthorRefund` | `refundAndDelist`, using the current R | `S - D` | `D - A` |
+| `ThresholdReached` | Purchase makes `R >= S` | 0 | `S - A` |
+| `Rejected` | No appeal by the deadline, or appeal rejected | 0 | `S - A` |
+| `AppealTimeout` | The reviewer missed the resolution deadline | `S - A` | 0 **[OPEN Q1]** |
 
-Sale fee: `f(P) = max(minFee, floor(P * feeBps / 10000))`. A publication's price must satisfy `price >= minFee` and `price > 0`, and every policy has `feeBps <= 10000`. Together these guarantee `f(P) <= P`.
+Per the report's confirmed rules, a final rejection forfeits the remainder `S - A` to the owner. The AppealTimeout row follows the report's recommended fallback, which it marks as still needing product approval.
 
-Worked example: `S = 1000`, `aiCap = 200`, `A = 150`, so `Q = 250`.
+Sale fee: `f(P) = max(minFee, floor(P * feeBps / 10000))`. Every policy has `feeBps <= 10000` and `minPrice > minFee`, and every price satisfies `minPrice <= P <= maxPrice`. Together these guarantee `0 <= f(P) <= P` and `P > 0`.
 
-| Case | R | D | F | O |
+Worked examples from the report (`S = 100`), checked against the formula:
+
+| R | A | D | F | O |
 | --- | --- | --- | --- | --- |
-| Rejected, no sales | 0 | 250 | 750 | 100 |
-| AuthorRefund after sales | 600 | 600 | 400 | 450 |
-| ThresholdReached | ≥ 1000 | 1000 | 0 | 850 |
+| 0 | 10 | 25 | 75 | 15 |
+| 60 | 10 | 60 | 40 | 50 |
+| 20 | 40 | 40 | 60 | 0 |
+| 100 | 10 | 100 | 0 | 90 |
 
-## 3. Money flow
+## 3. Money flow and accounting
 
-The contract uses pull payments. Every allocation becomes a credit (`creditOf[account]`), and only that account can withdraw it, by calling `withdraw()`.
+The contract uses pull payments. Every allocation becomes a credit, and only the credited account can withdraw it.
 
 | When | Credit | Recipient | Kind |
 | --- | --- | --- | --- |
@@ -58,14 +79,13 @@ The contract uses pull payments. Every allocation becomes a credit (`creditOf[ac
 | Deposit settlement | `F` | Author | `DepositRefund` |
 | Deposit settlement | `O` | Owner recipient (current) | `OwnerAllocation` |
 
-A deposit is settled exactly once. Settlement credits `F` and `O` and records `settlementReason`, `authorRefund`, `ownerAllocation` and `settledAt`. `A` is credited when it is recognized, not at settlement. Zero-amount credits are skipped and emit no event.
-
 Accounting:
-- `totalHeldDeposits` = the sum, over unsettled publications, of `S - A`. Before review the term for a publication is the full `S`.
+- `totalLockedDeposits` = the sum, over unsettled publications, of `S - A`. Creation adds `S`. Recognizing A moves `A` from locked to credits. Settlement moves `F + O` to credits.
 - `totalCredits` = the sum of unwithdrawn credits.
-- `address(this).balance >= totalHeldDeposits + totalCredits` always holds. The contract has no `receive` or `fallback`, so plain ETH transfers revert.
+- `liabilitiesCovered()` returns `address(this).balance >= totalCredits + totalLockedDeposits`, which must always be true.
+- `receive` and `fallback` revert with `DirectPaymentRejected`, so ETH enters only through `createPublication` and `purchase`. ETH force-sent via `selfdestruct` becomes unreachable surplus. No function sweeps it.
 
-Changing the owner or AI expense recipient affects future credits only.
+Changing the owner or AI expense recipient affects future credits only. Zero-amount credits are skipped.
 
 ## 4. Roles
 
@@ -77,95 +97,124 @@ Changing the owner or AI expense recipient affects future credits only.
 | `REVIEWER_ROLE` | `resolveAppeal` | Same |
 | `PAUSER_ROLE` | `pause`, `unpause` | Same |
 
-No role may sweep funds, change a publication's frozen terms (author, policy, hashes, Arweave IDs, page count, price, deposit, aiCap), change an existing policy, or withdraw or redirect another account's credits. The contract has no function that does any of these things.
+No role may sweep funds, change a publication's frozen terms, change an existing policy, or withdraw or redirect another account's credits. A test asserts that the deployed contract's state-changing functions are exactly the documented set.
 
-Signatures are verified by recovering the signer with `ECDSA.recover` over the EIP-712 digest and checking that the signer holds the required role at the time of the call. Revoking a signer's role invalidates its unused signatures.
+Signatures are verified with `ECDSA.tryRecover` over the EIP-712 digest, and the recovered signer must currently hold the role. Malformed signatures revert with the contract's own error, not an ECDSA error. Revoking a signer's role invalidates its unused signatures.
 
-The constructor takes `(admin, ownerRecipient, aiExpenseRecipient)`, all non-zero. It grants `DEFAULT_ADMIN_ROLE` to `admin` and grants no other roles; the admin grants them explicitly.
+The constructor takes `(admin, ownerRecipient, aiExpenseRecipient)`, all non-zero. It grants only `DEFAULT_ADMIN_ROLE`.
 
 ## 5. Policies
 
-`createPolicy(feeBps, minFee, appealWindow, resolutionWindow)` creates an immutable policy with sequential ids starting at 1. It requires `feeBps <= 10000`, `appealWindow > 0` and `resolutionWindow > 0`. A publication references its `policyId`, and because policies never change, the publication's fee and timing terms are frozen. Policies cannot be retired in Parts 1-8; the backend simply stops quoting a policy it no longer wants to use.
+`createPolicy(Policy)` appends an immutable policy. It is `DEFAULT_ADMIN_ROLE` only, and ids are sequential from 1. No function modifies a policy, so a publication's `policyId` freezes its terms.
+
+| Field | Rule |
+| --- | --- |
+| `minFee` | wei, may be 0 |
+| `feeBps` | `<= 10000` |
+| `minPrice` | `> minFee` |
+| `maxPrice` | `>= minPrice` |
+| `appealDuration` | `> 0` seconds (report: 72 hours) |
+| `appealResolutionDuration` | `> 0` seconds (report: not yet approved) |
+| `refundDelay` | `> 0` seconds after `publishedAt` (report: 30 days) |
+| `purchaseRequiresPersonhood` | Whether `purchase` requires a Purchase certificate |
+
+Any other combination reverts with `InvalidPolicy`. The report's richer price ceiling, `min(global cap, alpha·S, beta·pages·ratingMultiplier)`, is computed by the backend when it issues a quote. The contract enforces only `[minPrice, maxPrice]`.
 
 ## 6. Publication record
 
 | Group | Fields |
 | --- | --- |
-| Frozen | `author`, `policyId`, `manifestHash`, `previewManifestHash`, `arweaveBundleTxId`, `arweavePreviewTxId`, `pageCount`, `price`, `deposit` (S), `aiCap` |
-| Review | `ratingSnapshot`, `aiCost` (A) |
+| Frozen (from the quote) | `author`, `policyId`, `manifestHash`, `previewManifestHash`, `arweaveBundleTxId`, `arweavePreviewTxId`, `pageCount`, `ratingSnapshot`, `price`, `deposit` (S), `aiCap` |
+| Review | `aiCost` (A) |
 | Money | `grossSales` (R), `authorRefund` (F), `ownerAllocation` (O) |
 | States | `state` (review), `listingState`, `settlementReason` |
 | Timestamps | `createdAt`, `reviewedAt`, `appealDeadline`, `appealedAt`, `resolutionDeadline`, `decidedAt`, `publishedAt`, `delistedAt`, `settledAt` |
 
-- Publication ids are sequential and start at 1.
-- Both Arweave IDs are stored as `bytes32`: the 32 raw bytes of the 43-character Base64URL ID (see section 10). Both must be non-zero and can never change.
-- `arweaveBundleTxId` points to the encrypted full pages. `arweavePreviewTxId` points to a public preview manifest with display metadata (title, description, language, genre, preview image references). `previewManifestHash` is `keccak256` of that manifest's canonical bytes. `manifestHash` is `keccak256` of the canonical bundle manifest. **[OPEN Q4]**
-- `ratingSnapshot` is the content-maturity code set by the review report. Its meaning is defined off chain. It is not a user rating. **[OPEN Q5]**
+- Publication ids are sequential from 1. A new version of a comic is a new publication.
+- The Arweave IDs are stored as `bytes32`: the 32 raw bytes of the 43-character Base64URL ID (section 10). Both must be non-zero and can never change.
+- `arweaveBundleTxId` points to encrypted full pages. `arweavePreviewTxId` points to a public preview manifest holding the title, description, language, genre and preview image references. `previewManifestHash` hashes that manifest's canonical bytes, and `manifestHash` hashes the canonical bundle manifest. Both are `keccak256` **[OPEN Q4]**.
+- `ratingSnapshot` is the author-rating snapshot frozen into the quote (report §7, items 12 and 15). It is a `uint8` whose scale is defined off chain.
 
 ## 7. State machines
 
-Review state, listing state and settlement reason are three separate fields.
+Review state, listing state and settlement reason are separate fields. A published comic may have a settled deposit and still sell.
 
 ```
                  report: Approve
  Deposited ─────────────────────────────────────────► Approved ──publish──► Published
      │ report: Flag                                       ▲
      ▼                     resolveAppeal(approve)         │
-  Flagged ──appeal (≤ appealDeadline)──► AppealPending ───┘
+  Flagged ──appeal (< appealDeadline)──► AppealPending ───┘
      │                                     │      │
      │ finalizeRejection                   │      │ claimAppealTimeout
-     │ (> appealDeadline)                  │      │ (> resolutionDeadline)
+     │ (>= appealDeadline)                 │      │ (>= resolutionDeadline)
      ▼                                     ▼      ▼
   Rejected (reason Rejected) ◄─resolveAppeal(reject)   Rejected (reason AppealTimeout)
 ```
 
+Time boundaries follow the report:
+- An action allowed "before a deadline" needs `block.timestamp < deadline`.
+- The fallback becomes available when `block.timestamp >= deadline`.
+- Expiry of a quote or certificate allows use while `block.timestamp <= expiresAt`.
+
 | Function | Caller | Precondition | Effect | Paused? |
 | --- | --- | --- | --- | --- |
-| `createPublication` | Author (`quote.author`) | Valid quote and certificate, `msg.value == deposit` | Deposited, Unlisted | Blocked |
-| `submitReviewReport` | Anyone (relayer) | State Deposited; valid report; `report.manifestHash` matches | Sets `A`, `ratingSnapshot`, `reviewedAt`; credits `A`; goes to Approved, or to Flagged with `appealDeadline = now + appealWindow` | Blocked |
-| `appeal` | Author | Flagged, `now <= appealDeadline` | AppealPending, `resolutionDeadline = now + resolutionWindow` | Allowed |
-| `resolveAppeal` | `REVIEWER_ROLE` | AppealPending, `now <= resolutionDeadline` | Approved, or Rejected and settled (`Rejected`) | Allowed |
-| `finalizeRejection` | Anyone | Flagged, `now > appealDeadline` | Rejected and settled (`Rejected`) | Allowed |
-| `claimAppealTimeout` | Author | AppealPending, `now > resolutionDeadline` | Rejected and settled (`AppealTimeout`) | Allowed |
-| `publish` | Author | Approved, Unlisted | Published, Listed, `publishedAt` | Blocked |
-| `purchase` | Buyer | Published and Listed; `msg.value == price`; valid certificate for the buyer; unused `requestId`; buyer not already entitled | Entitlement; `R += P`; fee and proceeds credited; if the deposit is unsettled and `R >= S`, it settles (`ThresholdReached`) | Blocked |
-| `refundAndDelist` | Author | Approved or Published, not Delisted | Settles (`AuthorRefund`) if unsettled; listing becomes Delisted; review state unchanged | Allowed |
-| `withdraw` | Any credit holder | Credit > 0 | Sends the full credit | Allowed |
+| `createPublication` | Author | See section 8 | Deposited, Unlisted; `totalLockedDeposits += S` | **Blocked** |
+| `submitReviewReport` | Anyone (relayer) | Deposited; valid unused report; `manifestHash` matches; `aiCost <= aiCap` | Sets A and `reviewedAt`; credits A; Approved, or Flagged with `appealDeadline = now + appealDuration` | Allowed |
+| `appeal` | Author | Flagged, `now < appealDeadline` | AppealPending, `resolutionDeadline = now + appealResolutionDuration` | Allowed |
+| `resolveAppeal` | `REVIEWER_ROLE` | AppealPending, `now < resolutionDeadline` | Approved, or Rejected and settled (`Rejected`) | Allowed |
+| `finalizeRejection` | Anyone | Flagged, `now >= appealDeadline` | Rejected and settled (`Rejected`) | Allowed |
+| `claimAppealTimeout` | Author | AppealPending, `now >= resolutionDeadline` | Rejected and settled (`AppealTimeout`) | Allowed |
+| `publish` | Author | Approved, Unlisted | Published, Listed, `publishedAt` | Allowed |
+| `purchase` | Buyer | Published and Listed; `msg.value == price`; unused `requestId`; buyer not entitled; valid Purchase certificate if the policy requires one | Entitlement; `R += P`; fee and proceeds credited; if the deposit is unsettled and `R >= S`, settles (`ThresholdReached`) | **Blocked** |
+| `refundAndDelist(id, minRefund)` | Author | Published and Listed; `now >= publishedAt + refundDelay`; `R < S`; deposit unsettled; `F >= minRefund` | Delisted, settles (`AuthorRefund`) | Allowed |
+| `withdraw` | Credit holder | Credit > 0 | Sends the full credit (`nonReentrant`, checks-effects-interactions) | Allowed |
 
-Pausing blocks only new inflows (create, report, publish, purchase). Exits and the time-bounded review steps keep working, so pausing can never trap funds or make a deadline pass unfairly. Deadlines keep running while the contract is paused. **[OPEN Q3]**
+Pausing blocks only new deposits and purchases. Review, appeals, publishing, refunds and withdrawals keep working, so pausing never traps funds or makes a deadline pass unfairly. Deadlines keep running while the contract is paused.
 
-After `ThresholdReached`, `R` keeps accumulating, but settlement is final. `refundAndDelist` then only delists, and `F = 0` is already recorded.
-
-`refundAndDelist` on an Approved publication that was never published is allowed. Its listing state goes from Unlisted to Delisted, which blocks a later `publish`.
+There is no automatic refund or forfeiture when time passes. Delisting without a refund, and delisting before `refundDelay`, are not supported. The report says not to add them silently.
 
 ### Entitlements
 
 - `hasReadingAccess(id, account)` returns true if `account` is the author or has purchased `id`.
-- Entitlements are permanent. Delisting does not revoke them. The backend must still deliver keys to existing buyers of delisted publications.
-- One purchase per account per publication. A repeat purchase reverts with `AlreadyEntitled`. The author may buy their own publication, and that sale counts toward `R`.
-- `requestId` is a buyer-chosen, globally unique `bytes32` idempotency key used to link a purchase to a backend order. A reused `requestId` reverts.
+- Entitlements are permanent and survive delisting.
+- One entitlement per wallet per publication; a repeat purchase reverts. Self-purchases are allowed and count toward `R`.
+- `requestId` is a buyer-chosen, globally unique `bytes32` idempotency key.
 
-## 8. EIP-712
+## 8. EIP-712 and publication creation
 
-Domain: `name = "ConsentCraftMarket"`, `version = "1"`, `chainId` (11155111 on Sepolia, 31337 locally), `verifyingContract = <market address>`. The domain is exposed through ERC-5267 `eip712Domain()`.
-
-Enums are encoded as `uint8`. Field order is normative.
+Domain: `name = "ConsentCraftMarket"`, `version = "1"`, `chainId`, `verifyingContract`. It is exposed via ERC-5267 `eip712Domain()`. Enums are encoded as `uint8`, and field order is normative. Every field is static, so the contract hashes `abi.encode(TYPEHASH, struct)` directly.
 
 ```
-PublicationQuote(bytes32 quoteId,address author,uint256 policyId,bytes32 manifestHash,bytes32 previewManifestHash,bytes32 arweaveBundleTxId,bytes32 arweavePreviewTxId,uint32 pageCount,uint256 price,uint256 deposit,uint256 aiCap,uint64 expiresAt)
+PublicationQuote(address author,bytes32 manifestHash,bytes32 previewManifestHash,bytes32 arweaveBundleTxId,bytes32 arweavePreviewTxId,uint32 pageCount,uint256 policyId,uint256 price,uint256 deposit,uint256 aiCap,uint8 ratingSnapshot,uint64 expiresAt,uint256 nonce)
 
-PersonhoodCertificate(address account,bytes32 personhoodHash,uint64 issuedAt,uint64 expiresAt)
+PersonhoodCertificate(address wallet,uint8 action,uint64 expiresAt,uint256 nonce)      action: 0 = PUBLISH, 1 = PURCHASE
 
-ReviewReport(bytes32 reportId,uint256 publicationId,bytes32 manifestHash,uint8 outcome,uint256 aiCost,uint8 ratingSnapshot,bytes32 reasonHash,uint64 expiresAt)
+ReviewReport(bytes32 reportId,uint256 publicationId,bytes32 manifestHash,uint8 outcome,uint256 aiCost,bytes32 reportHash,uint64 expiresAt)
 ```
 
-| Type | Signer role | Checks | Replay protection |
-| --- | --- | --- | --- |
-| PublicationQuote | `QUOTE_SIGNER_ROLE` | `author == msg.sender`; `now <= expiresAt`; policy exists; `deposit > aiCap`; `price > 0` and `price >= minFee`; hashes and IDs non-zero; `pageCount > 0`; `msg.value == deposit` | `quoteId` single use, plus domain |
-| PersonhoodCertificate | `QUOTE_SIGNER_ROLE` | `account == msg.sender`; `issuedAt <= now <= expiresAt` | Reusable until expiry; bound to `account` and the domain. `personhoodHash` (app-scoped World ID nullifier hash) is never stored or emitted. **[OPEN Q2]** |
-| ReviewReport | `REPORTER_ROLE` | Publication is Deposited; `manifestHash` matches; `now <= expiresAt`; `aiCost <= aiCap` | `reportId` single use; a publication only accepts one report, from Deposited |
+| Type | Signer | Replay protection |
+| --- | --- | --- |
+| PublicationQuote | `QUOTE_SIGNER_ROLE` | `nonce` single use (global quote-nonce set), plus domain and expiry |
+| PersonhoodCertificate | `QUOTE_SIGNER_ROLE` | `nonce` single use (global certificate-nonce set), bound to wallet and action, plus domain and expiry |
+| ReviewReport | `REPORTER_ROLE` | `reportId` single use; a publication accepts one report |
 
-A certificate is required for `createPublication` (by the author) and for `purchase` (by the buyer).
+The backend should draw nonces at random as 256-bit values. Nonces are consumed only when a call succeeds, so a reverted transaction can be retried with the same signatures.
+
+`createPublication(quote, quoteSignature, certificate, certificateSignature)` is payable and `whenNotPaused`. It checks the following in order and reverts on the first failure:
+
+1. `quote.author == msg.sender` (`QuoteAuthorMismatch`)
+2. `block.timestamp <= quote.expiresAt` (`QuoteExpired`)
+3. The quote nonce is unused (`QuoteNonceUsed`)
+4. The quote signature recovers to a `QUOTE_SIGNER_ROLE` holder (`InvalidQuoteSignature`)
+5. `certificate.wallet == msg.sender` (`CertificateWalletMismatch`), `action == Publish` (`CertificateActionMismatch`), `block.timestamp <= expiresAt` (`CertificateExpired`), unused nonce (`CertificateNonceUsed`), valid signer (`InvalidCertificateSignature`)
+6. The policy exists (`UnknownPolicy`)
+7. Both manifest hashes are non-zero (`ZeroManifestHash`), both Arweave IDs are non-zero (`ZeroArweaveTxId`), and `pageCount > 0` (`ZeroPageCount`)
+8. `minPrice <= price <= maxPrice` (`PriceOutOfBounds`)
+9. `deposit > aiCap` (`InvalidDepositTerms`)
+10. `msg.value == deposit` (`DepositMismatch`)
+
+Then it marks both nonces used, stores the publication with `createdAt = block.timestamp`, adds S to `totalLockedDeposits`, and emits `PublicationCreated`.
 
 ## 9. Events
 
@@ -173,17 +222,12 @@ Every state change emits an event. Together they let an indexer rebuild the mark
 
 | Event | Emitted by |
 | --- | --- |
-| `PolicyCreated` | `createPolicy` |
-| `OwnerRecipientUpdated`, `AiExpenseRecipientUpdated` | Recipient setters |
-| `PublicationCreated` (id, author, policyId, manifestHash, previewManifestHash, both Arweave IDs, pageCount, price, deposit, aiCap) | `createPublication` |
-| `ReviewStatusChanged` (previous state, new state) | Every review-state transition after creation (`PublicationCreated` implies Deposited) |
-| `ReviewReportSubmitted` | `submitReviewReport` |
-| `PublicationFlagged` | Report with Flag outcome |
-| `AppealFiled` | `appeal` |
-| `AppealResolved` | `resolveAppeal` |
-| `PublicationApproved` (path Report or Appeal) | Approval |
-| `PublicationRejected` (reason Rejected or AppealTimeout) | Rejection |
-| `PublicationPublished` | `publish` |
+| `PolicyCreated` (all policy fields) | `createPolicy` |
+| `OwnerRecipientUpdated`, `AiExpenseRecipientUpdated` | Constructor (previous recipient is zero) and the setters |
+| `PublicationCreated` (id, author, policyId, manifestHash, previewManifestHash, both Arweave IDs, pageCount, price, deposit, aiCap) | `createPublication`; implies Deposited and Unlisted |
+| `ReviewStatusChanged` | Every review-state transition after creation |
+| `ReviewReportSubmitted`, `PublicationFlagged`, `AppealFiled`, `AppealResolved`, `PublicationApproved`, `PublicationRejected` | Review and appeal steps |
+| `PublicationPublished` (price, `refundEligibleAt`) | `publish` |
 | `PublicationDelisted` | `refundAndDelist` |
 | `Purchased` (id, buyer, requestId, price, platformFee, authorProceeds, cumulativeGrossSales) | `purchase` |
 | `DepositSettled` (reason, S, A, F, O, R) | Any settlement |
@@ -193,27 +237,38 @@ Every state change emits an event. Together they let an indexer rebuild the mark
 
 ## 10. Arweave transaction IDs
 
-According to the [Arweave HTTP API docs](https://docs.arweave.org/developers/arweave-node-server/http-api), a transaction `id` is "A SHA-256 hash of the transaction signature", serialized as a case-sensitive Base64URL string. A 32-byte digest encodes to 43 characters of unpadded Base64URL. Its bytes are stored directly as `bytes32`.
+According to the [Arweave HTTP API docs](https://docs.arweave.org/developers/arweave-node-server/http-api), a transaction `id` is "A SHA-256 hash of the transaction signature", serialized as a case-sensitive Base64URL string. That is 32 bytes, or 43 unpadded characters, stored directly as `bytes32`.
 
-Conversion lives in [contracts/lib/arweave-tx-id.ts](../contracts/lib/arweave-tx-id.ts) (`arweaveTxIdToBytes32`, `bytes32ToArweaveTxId`, `isArweaveTxId`). It rejects:
+[contracts/lib/arweave-tx-id.ts](../contracts/lib/arweave-tx-id.ts) converts between the two forms. It rejects:
 - the wrong length
-- padding (`=`)
-- the standard Base64 characters `+` and `/`
+- padding
+- the characters `+` and `/`
 - whitespace
-- non-canonical trailing bits (the final character must be one of `AEIMQUYcgkosw048`)
+- non-canonical trailing bits
 - the all-zero value
 
 ## 11. Security notes
 
-- `nonReentrant` is applied to every function that moves ETH or changes balances. `withdraw` zeroes the credit before the external call, using checks-effects-interactions.
-- `withdraw` sends via `call`, and a failure reverts. A recipient contract that rejects ETH can only block its own withdrawal.
-- There is no admin sweep. ETH force-sent to the contract (via `selfdestruct`) is unreachable surplus.
-- Arithmetic is checked (0.8.x). `Q` is computed as `S / 4 + (S % 4 == 0 ? 0 : 1)` to avoid overflow at the top of the range.
+- Checks-effects-interactions everywhere. `nonReentrant` on every function that sends ETH.
+- `withdraw` uses `call`, and a failure reverts and preserves the credit. A recipient that rejects ETH blocks only its own withdrawal.
+- Arithmetic is checked (0.8.x).
+- A reviewer should be separate from the financial beneficiary where feasible. The owner gains from rejections, which is a governance risk the report says must be disclosed.
 
-## 12. Open questions
+## 12. Conflicts with the report
 
-- **Q1 (blocking):** Does `D = min(S, max(R, A, Q))` apply unchanged to `Rejected` and `AppealTimeout`? As written, a rejected or timed-out author loses `max(A, Q)`, which is at least a quarter of the deposit. For AppealTimeout, where the reviewer missed its own deadline, `D = A` (refund `S - A`) may be intended instead. The default applies the formula unchanged.
-- **Q2:** The personhood certificate is required for both `createPublication` and `purchase`. It is reusable until expiry and not tied to a nullifier on chain. Is that the intended gate, or should it be one-shot or apply only to authors?
-- **Q3:** There is no timeout if a publication sits in Deposited because the reporter never reports, so `S` is locked until a report arrives. Should the author be able to reclaim `S` after a review deadline? That would need a new function and settlement reason.
-- **Q4:** `manifestHash` and `previewManifestHash` are assumed to be `keccak256`. SHA-256 is also possible; it only matters to the backend and reporter.
-- **Q5:** `ratingSnapshot` is assumed to be a content-maturity code supplied by the review report.
+| Topic | Report | This spec | Resolution |
+| --- | --- | --- | --- |
+| Paid page storage | "Protected file storage", "private object storage", "full paid pages are not publicly retrievable", plus takedown remedies | Encrypted bundles on permanent public Arweave | **[OPEN Q5]** The ciphertext is public and permanent, so a leaked key can't be revoked by deleting the file, and takedowns can only revoke keys. |
+| Rejection settlement | Rejection forfeits `S - A`; F = 0 | Previously applied the general formula | Spec now follows the report |
+| Refund eligibility | 30 days after publication, R < S, unsettled; optional minimum refund; no early or plain delisting | Previously allowed refunds on Approved, and delisting after threshold | Spec now follows the report |
+| Deadline boundaries | Appeal strictly before the deadline; finalization at or after it | Previously `<=` and `>` | Spec now follows the report |
+| Rating snapshot | Author-rating snapshot frozen at submission | Previously set by the review report | Now carried in the quote, as the Part 2 prompt specifies |
+| Pause scope | Pausing stops new financial exposure | Previously also blocked reports and publishing | Now blocks only deposits and purchases |
+
+## 13. Open questions
+
+- **Q1:** AppealTimeout returns `S - A`. The report recommends this but says it needs product approval.
+- **Q2:** The personhood certificate is single use and covers one action. Should a buyer get a fresh certificate for every purchase? The report implies short-lived certificates.
+- **Q3:** There is no exit when the review never completes, so S stays locked. The report lists "service failure exit" as an undecided launch decision.
+- **Q4:** Are the manifest hashes `keccak256`, or SHA-256?
+- **Q5:** Should encrypted bundles go on public, permanent Arweave (your spec) or on private storage (the report)?

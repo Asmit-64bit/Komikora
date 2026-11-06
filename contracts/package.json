@@ -12,6 +12,6 @@
     "compile": "node ../node_modules/hardhat/dist/src/cli.js build",
     "node": "node ../node_modules/hardhat/dist/src/cli.js node --hostname 127.0.0.1",
     "test": "node ../node_modules/hardhat/dist/src/cli.js test",
-    "typecheck": "node ../node_modules/typescript/bin/tsc --noEmit"
+    "typecheck": "node ../node_modules/hardhat/dist/src/cli.js build --quiet && node ../node_modules/typescript/bin/tsc --noEmit"
   }
 }
