@@ -117,12 +117,12 @@ The constructor takes `(admin, ownerRecipient, aiExpenseRecipient)`, all non-zer
 | `feeBps` | `<= 10000` |
 | `minPrice` | `> minFee` |
 | `maxPrice` | `>= minPrice` |
-| `appealDuration` | `> 0` seconds (report: 72 hours) |
-| `appealResolutionDuration` | `> 0` seconds (report: not yet approved) |
-| `refundDelay` | `> 0` seconds after `publishedAt` (report: 30 days) |
+| `appealDuration` | `> 0` and `<= 2^32 − 1` seconds (report: 72 hours) |
+| `appealResolutionDuration` | `> 0` and `<= 2^32 − 1` seconds (report: not yet approved) |
+| `refundDelay` | `> 0` and `<= 2^32 − 1` seconds after `publishedAt` (report: 30 days) |
 | `purchaseRequiresPersonhood` | Whether `purchase` requires a Purchase certificate |
 
-Any other combination reverts with `InvalidPolicy`. The report's richer price ceiling, `min(global cap, alpha·S, beta·pages·ratingMultiplier)`, is computed by the backend when it issues a quote. The contract enforces only `[minPrice, maxPrice]`.
+Any other combination reverts with `InvalidPolicy`. The duration bound (about 136 years) is technical: it keeps every `uint64` deadline from overflowing (audit finding L-01). The report's richer price ceiling, `min(global cap, alpha·S, beta·pages·ratingMultiplier)`, is computed by the backend when it issues a quote. The contract enforces only `[minPrice, maxPrice]`.
 
 ## 6. Publication record
 

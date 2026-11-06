@@ -37,6 +37,9 @@ contract ConsentCraftMarket is IConsentCraftMarket, AccessControl, Pausable, Ree
     );
 
     uint16 private constant MAX_BPS = 10_000;
+    /// @dev Upper bound for policy durations (~136 years). Keeps every `uint64(now) + duration`
+    /// deadline from overflowing, so publish, flagging and appeals can never be bricked by a policy.
+    uint64 private constant MAX_DURATION = type(uint32).max;
 
     // ---------------------------------------------------------------------
     // Storage
@@ -99,6 +102,8 @@ contract ConsentCraftMarket is IConsentCraftMarket, AccessControl, Pausable, Ree
         if (
             policy.feeBps > MAX_BPS || policy.minPrice <= policy.minFee || policy.maxPrice < policy.minPrice
                 || policy.appealDuration == 0 || policy.appealResolutionDuration == 0 || policy.refundDelay == 0
+                || policy.appealDuration > MAX_DURATION || policy.appealResolutionDuration > MAX_DURATION
+                || policy.refundDelay > MAX_DURATION
         ) {
             revert InvalidPolicy();
         }
