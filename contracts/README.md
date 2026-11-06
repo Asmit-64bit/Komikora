@@ -111,3 +111,17 @@ A test fails if the committed ABI differs from the compiled contract.
   - a review that never arrives leaves the deposit locked
   - purchase certificates aren't bound to a single publication
 - **Testnet only.** This has been reviewed internally only, with no external audit, and is not for mainnet or real value.
+
+## Comic ratings
+
+`ComicRatingRegistry` records comic pointers and immutable ratings by rubric version. Anyone can submit a comic; only a relayer can post a rating. Admins manage relayers, the minimum panel size (1–9), and pause/unpause. The latest rating is the most recently posted, regardless of version number. Even-panel medians average the two middle scores, rounded down. The registry trusts relayers to validate signed off-chain results; it does not verify TEE attestations or storage contents. Comic IDs are registry-local and are not marketplace publication IDs.
+
+For a Galileo testnet deployment, configure `REGISTRY_ADMIN_ADDRESS`, `REGISTRY_RELAYER_ADDRESS`, and `REGISTRY_MIN_PANEL_SIZE` in `contracts/.env` or the shell environment. Configure `OG_RPC_URL` and `OG_DEPLOYER_PRIVATE_KEY` in `contracts/.env` or the Hardhat keystore. Fund the deployer with testnet 0G. Then run:
+
+```sh
+npm run compile --workspace @consentcraft/contracts
+npm run deploy:registry:galileo --workspace @consentcraft/contracts
+npm run contracts:abi
+```
+
+Record the printed contract address for your client. The generated `abi/ComicRatingRegistry.ts` provides a typed viem ABI; the JSON ABI is also exported. No existing worker automatically submits ratings.

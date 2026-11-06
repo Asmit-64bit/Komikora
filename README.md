@@ -216,3 +216,7 @@ anonymous S3 object access returned HTTP 403. The local service containers are r
 
 The UI exposes World ID, Arkiv and 0G paths and reports missing configuration. Live private 0G image scoring and catalog checks passed; live World ID browser consent, Arweave publishing, Arkiv indexing of a public NFT deployment and WalletConnect QR still require verification. `npm run dev` starts the app;
 `npm run services:down` stops the local services while preserving data.
+
+### AI comic ratings
+
+The separate `ComicRatingRegistry` contract stores comic pointers and immutable AI jury ratings. See [contracts/README.md](contracts/README.md#comic-ratings) for the trust model, Galileo deployment configuration, and typed ABI export.
