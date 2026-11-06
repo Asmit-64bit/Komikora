@@ -5,6 +5,7 @@ import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import type { User, Project, Invitation } from "./types";
+import { cleanUsername, usernameKey, usernameProblem } from "./username";
 
 // Legacy records stay on disk for recovery, but cannot authenticate or be claimed
 // by a new wallet. Only a verified wallet session can access the studio.
@@ -87,7 +88,19 @@ export async function database<T>(fn: (db: Database) => T | Promise<T>, write = 
 
 export function id() { return randomBytes(32).toString("hex"); }
 export function publicUser(account: User): User {
-  return { id: account.id, name: account.name, address: account.address, color: account.color };
+  return { id: account.id, name: account.name, address: account.address, color: account.color, ...(account.username ? { username: account.username } : {}) };
+}
+/** Usernames keep their casing but are unique case-insensitively across all accounts. */
+export function normalizeUsername(value: unknown) {
+  ensure(typeof value === "string", "Username must be text.");
+  const username = cleanUsername(value);
+  const problem = usernameProblem(username);
+  ensure(!problem, problem);
+  return username;
+}
+export function findByUsername(db: Database, username: string) {
+  const key = usernameKey(username);
+  return db.users.find(account => account.address && account.username && usernameKey(account.username) === key);
 }
 export function sessionUser(db: Database, token?: string) {
   const session = token && db.sessions.find(s => s.token === token && s.auth === "wallet" && s.expires > Date.now());

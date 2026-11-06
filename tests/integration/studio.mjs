@@ -155,6 +155,29 @@ try {
   assert.equal((await owner.get(`?invitations=${id}`)).invitations.length, 0);
   console.log("PASS wallet-bound, single-use invitations, owner permissions, inboxes, and cancellation");
 
+  await other.post({ action: "setUsername", username: "x" }, 400);
+  await other.post({ action: "setUsername", username: "two words" }, 400);
+  await other.post({ action: "setUsername", username: "y".repeat(25) }, 400);
+  await other.post({ action: "setUsername", username: otherWallet.address }, 400);
+  for (const free of ["abc", "1234", "!!**", "Ünïcødé✨"]) assert.equal((await other.post({ action: "checkUsername", username: free })).available, true);
+  const named = await other.post({ action: "setUsername", username: "@Ink.Maker!" });
+  assert.equal(named.user.username, "Ink.Maker!");
+  assert.equal((await other.get()).user.username, "Ink.Maker!");
+  assert.equal((await collaborator.post({ action: "checkUsername", username: "ink.MAKER!" })).available, false);
+  assert.equal((await collaborator.post({ action: "checkUsername", username: "fresh_name" })).available, true);
+  await collaborator.post({ action: "setUsername", username: "INK.maker!" }, 409);
+  await anonymous.get("?users=ink", 401);
+  assert.deepEqual((await owner.get("?users=@INK")).users, [{ username: "Ink.Maker!", address: otherWallet.address }]);
+  assert.deepEqual((await other.get("?users=ink")).users, []);
+  assert.deepEqual((await owner.get("?users=i")).users, []);
+  await owner.post({ action: "invite", id, username: "nobody_here" }, 404);
+  const byName = await owner.post({ action: "invite", id, username: "@ink.maker!" });
+  const pending = (await owner.get(`?invitations=${id}`)).invitations;
+  assert.equal(pending.find(i => i.id === byName.token).username, "Ink.Maker!");
+  assert.equal((await other.get()).invitations[0].id, byName.token);
+  await owner.post({ action: "cancelInvite", id, invitation: byName.token });
+  console.log("PASS unique usernames, availability checks, @username search, and invitations by username");
+
   const png = await sharp({ create: { width: 16, height: 12, channels: 3, background: "#c6b3ed" } }).png().toBuffer();
   const image = `data:image/png;base64,${png.toString("base64")}`;
   const project = await getProject();

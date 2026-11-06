@@ -6,6 +6,7 @@ import { WalletProvider } from "@/components/wallet-provider";
 import { RainbowStudioProvider } from "@/components/rainbow-studio-provider";
 import "@rainbow-me/rainbowkit/styles.css";
 import "./globals.css";
+import "./text-stroke.css"; // subtle font stroke — remove this line to revert
 
 const inter = Inter({ subsets: ["latin"], style: ["normal", "italic"], variable: "--font-inter", display: "swap" });
 const playfair = Playfair_Display({ subsets: ["latin"], style: ["normal", "italic"], variable: "--font-playfair", display: "swap" });

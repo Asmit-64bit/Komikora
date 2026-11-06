@@ -1,8 +1,9 @@
 // Adapted from Asmit-64bit/consentcraft. This API covers the offchain studio only.
 import { NextRequest, NextResponse } from "next/server";
-import { AppError, database, ensure, event, id, publicUser, sessionUser, text } from "@/lib/store";
+import { AppError, database, ensure, event, findByUsername, id, normalizeUsername, publicUser, sessionUser, text } from "@/lib/store";
 import { walletAuth, walletAddress, SESSION_COOKIE } from "@/lib/wallet-auth";
 import { validateImage } from "@/lib/images";
+import { usernameKey } from "@/lib/username";
 import { checkOrigin, rateLimit } from "@/lib/server/http";
 import type { Panel, Project } from "@/lib/types";
 
@@ -43,8 +44,20 @@ export async function GET(req: NextRequest) {
   try {
     const token = req.cookies.get(SESSION)?.value;
     const projectId = req.nextUrl.searchParams.get("invitations");
+    const userQuery = req.nextUrl.searchParams.get("users");
+    if (userQuery !== null) rateLimit(req, "username-search", 60);
     return await database(db => {
       const user = sessionUser(db, token);
+      if (userQuery !== null) {
+        ensure(user, "Sign in to search collaborators.", 401);
+        const q = usernameKey(userQuery).slice(0, 48);
+        if (Array.from(q).length < 2) return json({ users: [] });
+        const users = db.users
+          .filter(account => account.address && account.username && account.id !== user.id && usernameKey(account.username).includes(q))
+          .sort((a, b) => Number(!usernameKey(a.username!).startsWith(q)) - Number(!usernameKey(b.username!).startsWith(q)) || a.username!.localeCompare(b.username!))
+          .slice(0, 8).map(account => ({ username: account.username!, address: account.address! }));
+        return json({ users });
+      }
       if (projectId) {
         ensure(user && db.projects.some(p => p.id === projectId && p.ownerId === user.id), "Project not found.", 404);
         return json({ invitations: db.invitations.filter(i => i.address && i.projectId === projectId && !i.accepted && Date.parse(i.expiresAt) > Date.now()) });
@@ -76,6 +89,21 @@ export async function POST(req: NextRequest) {
       ensure(action !== "signup" && action !== "login", "Use your wallet to sign in. Email and password authentication is disabled.", 400);
       const user = sessionUser(db, token);
       ensure(user, "Sign in to use your studio.", 401);
+      if (action === "checkUsername") {
+        const username = normalizeUsername(b.username);
+        const owner = findByUsername(db, username);
+        return json({ available: !owner || owner.id === user.id });
+      }
+      if (action === "setUsername") {
+        const username = normalizeUsername(b.username);
+        const owner = findByUsername(db, username);
+        ensure(!owner || owner.id === user.id, "That username is taken. Try another.", 409);
+        user.username = username;
+        user.name = username;
+        // Keep team credits on draft projects in step with the new name.
+        for (const project of db.projects) for (const member of project.members) if (member.userId === user.id && project.state === "draft") member.name = username;
+        return json({ user: publicUser(user) });
+      }
       if (action === "create") {
         const now = new Date().toISOString();
         const project: Project = {
@@ -117,10 +145,13 @@ export async function POST(req: NextRequest) {
           event(project, `${user.name} canceled a pending invitation.`);
           return json({ ok: true });
         }
-        const address = walletAddress(b.address);
+        const target = typeof b.username === "string" && b.username.trim() ? findByUsername(db, normalizeUsername(b.username)) : undefined;
+        ensure(!(typeof b.username === "string" && b.username.trim()) || target, "No one has that username yet. Check the spelling or use their wallet address.", 404);
+        const address = target ? walletAddress(target.address) : walletAddress(b.address);
         ensure(!project.members.some(member => db.users.find(user => user.id === member.userId)?.address?.toLowerCase() === address.toLowerCase()), "This wallet is already on the team.");
         ensure(!db.invitations.some(invitation => invitation.projectId === project.id && invitation.address?.toLowerCase() === address.toLowerCase() && !invitation.accepted && Date.parse(invitation.expiresAt) > Date.now()), "There is already a pending invitation for this wallet.", 409);
-        const invitation = { id: id(), projectId: project.id, address, expiresAt: new Date(Date.now() + 7 * 86400000).toISOString(), accepted: false };
+        const invitedUsername = target?.username || db.users.find(account => account.address?.toLowerCase() === address.toLowerCase())?.username;
+        const invitation = { id: id(), projectId: project.id, address, ...(invitedUsername ? { username: invitedUsername } : {}), expiresAt: new Date(Date.now() + 7 * 86400000).toISOString(), accepted: false };
         db.invitations.push(invitation);
         event(project, `${user.name} created a team invitation.`);
         return json({ token: invitation.id });

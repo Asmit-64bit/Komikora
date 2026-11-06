@@ -315,3 +315,34 @@
 .upload-mode button { border: 0; background: transparent; color: var(--color-felt-gray); padding: 8px 16px; border-radius: var(--radius-pill); font-size: 13px; cursor: pointer; }
 .upload-mode button.active { background: var(--fg); color: var(--bg); }
 .upload-area.document-upload { aspect-ratio: auto; min-height: 180px; padding: 28px 16px; margin-bottom: 18px; }
+
+/* Account button + dialog (custom replacement for the wallet account modal) */
+.account-button { display: inline-flex; align-items: center; gap: 10px; padding: 5px 16px 5px 5px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); background: var(--bg); color: var(--fg); font-size: 14px; font-weight: 500; cursor: pointer; max-width: 220px; }
+.account-button > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-button:hover { border-color: var(--fg); }
+.account-avatar { width: 30px; height: 30px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; color: #0a0a0b; font-size: 12px; font-weight: 700; }
+.account-dialog { max-width: 420px; }
+.account-dialog .modal-inner { position: relative; padding: 32px; }
+.account-close { position: absolute; top: 16px; right: 16px; }
+.account-summary { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; margin: 8px 0 20px; }
+.account-summary .account-avatar { width: 84px; height: 84px; font-size: 32px; }
+.account-dialog h2 { font-size: 28px; font-weight: 500; overflow-wrap: anywhere; }
+.account-address { font-size: 13px; color: var(--color-felt-gray); font-family: ui-monospace, monospace; }
+.account-name-button { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 12px; border: 1px dashed var(--line-strong); background: transparent; color: var(--fg); font-size: 13px; cursor: pointer; margin-bottom: 14px; }
+.account-name-button:hover { border-color: var(--fg); }
+.account-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.account-actions button { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 8px; border: 0; border-radius: 22px; background: var(--wash); color: var(--fg); font-size: 14px; font-weight: 600; cursor: pointer; }
+.account-actions button:hover { background: rgba(255, 255, 255, .12); }
+.username-form { display: grid; gap: 4px; margin: 4px 0 16px; }
+.username-form label { display: grid; gap: 8px; font-size: 13px; }
+.username-input { display: flex; align-items: center; border: 1px solid var(--line-strong); padding: 0 12px; }
+.username-input:focus-within { border-color: var(--fg); }
+.username-input > span { color: var(--color-felt-gray); }
+.username-input input { border: 0; background: none; margin: 0; padding: 12px 4px; width: 100%; color: var(--fg); font-size: 15px; outline: none; }
+.username-form .field-hint { margin-top: 2px; min-height: 1.6em; }
+.username-form .field-hint.is-error { color: var(--danger-fg); }
+.username-form .field-hint.is-ok { color: var(--iris-sky, #8fd3ff); }
+.username-form .button { justify-content: center; margin-top: 6px; }
+.collaborator-search { width: 100%; border: 1px solid var(--line-strong); padding: 0 12px; }
+@media (max-width: 640px) { .account-button { max-width: 150px; } .account-dialog .modal-inner { padding: 28px 20px; } }
+.collaborator-inline { flex: 1; min-width: 0; margin: 0; }
