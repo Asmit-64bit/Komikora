@@ -13,14 +13,15 @@
     }
   },
   "workspaces": [
-    "contracts"
+    "contracts",
+    "indexer"
   ],
   "scripts": {
     "dev": "node node_modules/next/dist/bin/next dev",
     "build": "node node_modules/next/dist/bin/next build",
     "start": "node node_modules/next/dist/bin/next start",
     "lint": "node node_modules/eslint/bin/eslint.js",
-    "typecheck": "node node_modules/next/dist/bin/next typegen && node node_modules/typescript/bin/tsc --noEmit && npm run typecheck --workspace @consentcraft/contracts",
+    "typecheck": "node node_modules/next/dist/bin/next typegen && node node_modules/typescript/bin/tsc --noEmit && npm run typecheck --workspace @consentcraft/contracts && npm run typecheck --workspace @consentcraft/indexer",
     "check": "npm run lint && npm run typecheck",
     "env:setup": "node scripts/setup-env.mjs",
     "services:up": "docker compose --env-file .env.local up -d --wait",
@@ -36,6 +37,10 @@
     "contracts:deploy:sepolia": "npm run deploy:sepolia --workspace @consentcraft/contracts",
     "contracts:smoke:sepolia": "npm run smoke:sepolia --workspace @consentcraft/contracts",
     "contracts:verify:sepolia": "npm run verify:sepolia --workspace @consentcraft/contracts --",
+    "indexer": "npm run cli --workspace @consentcraft/indexer --",
+    "indexer:test": "npm run test --workspace @consentcraft/indexer",
+    "indexer:test:live": "npm run test:live --workspace @consentcraft/indexer",
+    "contracts:record-indexer-fixture": "npm run record-indexer-fixture --workspace @consentcraft/contracts",
     "test": "node node_modules/vitest/vitest.mjs run",
     "test:watch": "node node_modules/vitest/vitest.mjs",
     "test:e2e": "node node_modules/@playwright/test/cli.js test",

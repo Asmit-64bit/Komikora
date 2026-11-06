@@ -18,6 +18,7 @@
     "smoke:sepolia": "node --env-file-if-exists=.env ../node_modules/hardhat/dist/src/cli.js run --network sepolia scripts/smoke-sepolia.ts",
     "verify:sepolia": "node --env-file-if-exists=.env ../node_modules/hardhat/dist/src/cli.js verify --network sepolia",
     "deploy:local": "node --env-file=local-node.env ../node_modules/hardhat/dist/src/cli.js run --network localhost scripts/deploy.ts",
-    "smoke:local": "node --env-file=local-node.env ../node_modules/hardhat/dist/src/cli.js run --network localhost scripts/smoke-sepolia.ts"
+    "smoke:local": "node --env-file=local-node.env ../node_modules/hardhat/dist/src/cli.js run --network localhost scripts/smoke-sepolia.ts",
+    "record-indexer-fixture": "node ../node_modules/hardhat/dist/src/cli.js run scripts/record-indexer-fixture.ts"
   }
 }

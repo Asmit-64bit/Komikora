@@ -51,3 +51,6 @@ test-results/
 # contract deployments: only public networks are committed
 contracts/deployments/localhost.json
 contracts/deployments/hardhat*.json
+
+# indexer checkpoint state (contains no secrets, but is machine-local)
+indexer/.state/

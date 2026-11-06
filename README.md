@@ -29,6 +29,30 @@ Open http://localhost:3000. The starter can run without Docker or external crede
 
 Run `npm run contracts:node` in another terminal when a local EVM is needed. The chain listens on 127.0.0.1:8545 with chain ID 31337 and disposable test accounts. Sepolia deployment commands and their environment (`contracts/.env.example`) are documented in [contracts/README.md](contracts/README.md).
 
+## Arkiv index (marketplace and trade feed)
+
+The [indexer](indexer/README.md) projects confirmed ConsentCraftMarket events into public Arkiv entities on the **Rabdi testnet** (chain 7794095, explorer <https://rabdi.explorer.arkiv.network>). Entity design: [arkiv/schema.md](arkiv/schema.md). The contract stays the authority for payments and reading access; Arkiv is only an index.
+
+| Entity-writing wallet | Network |
+| --- | --- |
+| **TODO:** not created yet; set `ARKIV_PRIVATE_KEY` and record the address here | Arkiv Rabdi testnet |
+
+**Query for judges.** Read-only, no key needed:
+
+```sh
+npm run indexer -- listings --writer <WRITER_ADDRESS> --listing any --unverified
+npm run indexer -- trades --writer <WRITER_ADDRESS>
+```
+
+The same listing query as raw JSON-RPC:
+
+```sh
+curl -s -X POST -H 'content-type: application/json' https://rpc.rabdi.db-chain.testnet.arkiv.network --data \
+  '{"jsonrpc":"2.0","id":1,"method":"arkiv_query","params":["arkiv.schema = str('"'"'consentcraft.listing.v1'"'"') AND $owner = addr(<WRITER_ADDRESS>)",{"select":{"key":true,"expiresAt":true,"attributes":true},"limit":"0x14"}]}'
+```
+
+No entities have been written yet. Both commands currently return empty results.
+
 ## Tooling
 
 | Area | Setup |
