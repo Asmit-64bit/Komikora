@@ -95,5 +95,6 @@ export async function completeVerification(db: Database, user: User, raw: unknow
   db.worldIdNullifiers[key] = user.id;
   const account = db.users.find(u => u.id === user.id)!;
   account.worldIdVerifiedAt = new Date().toISOString();
+  account.worldIdEnvironment = config.environment;
   return { verifiedAt: account.worldIdVerifiedAt };
 }

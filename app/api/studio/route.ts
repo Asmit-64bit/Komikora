@@ -130,7 +130,7 @@ export async function POST(req: NextRequest) {
       }
       ensure(action === "save", "Unknown action.");
       ensure(b.revision === project.revision, "This project changed in another session. Reload the latest version before continuing.", 409);
-      ensure(Array.isArray(b.panels) && b.panels.length === 4, "A comic needs four panel slots.");
+      ensure(Array.isArray(b.panels) && b.panels.length >= 1 && b.panels.length <= 24, "A comic needs 1–24 pages or panels.");
       const panels: Panel[] = [];
       for (const raw of b.panels) {
         ensure(raw && typeof raw === "object" && !Array.isArray(raw), "Invalid panel.");

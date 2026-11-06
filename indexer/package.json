@@ -13,6 +13,7 @@
     "cli": "node --env-file-if-exists=.env src/cli.ts",
     "test": "node --test --test-reporter=spec test/*.test.ts",
     "test:live": "ARKIV_LIVE=1 node --env-file-if-exists=.env --test --test-reporter=spec test/live-arkiv.test.ts",
-    "typecheck": "node ../node_modules/typescript/bin/tsc --noEmit"
+    "typecheck": "node ../node_modules/typescript/bin/tsc --noEmit",
+    "editions": "node --env-file-if-exists=.env src/editions.ts"
   }
 }

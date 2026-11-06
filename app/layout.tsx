@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { StudioProvider } from "@/components/studio-provider";
 import { WalletProvider } from "@/components/wallet-provider";
 import { RainbowStudioProvider } from "@/components/rainbow-studio-provider";
@@ -13,7 +14,12 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en">
-      <body><WalletProvider><StudioProvider><RainbowStudioProvider>{children}</RainbowStudioProvider></StudioProvider></WalletProvider></body>
+      <body>
+        {/* Both wallet SDKs generate IDs during render; keep that work outside the static shell. */}
+        <Suspense fallback={<div className="loading-state" role="status"><span className="loading-star" aria-hidden="true">✳</span><h2>Opening your studio…</h2></div>}>
+          <WalletProvider><StudioProvider><RainbowStudioProvider>{children}</RainbowStudioProvider></StudioProvider></WalletProvider>
+        </Suspense>
+      </body>
     </html>
   );
 }

@@ -23,9 +23,9 @@ test("rejecting a signature does not log in, and retry succeeds", async ({ page 
   await expect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("wallet-studio.png") });
   await page.getByTestId("rk-account-button").click();
-  await expect(dialog.getByRole("button", { name: "Disconnect", exact: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: /^Disconnect(?: Disconnect)?$/ })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("wallet-account-mobile.png") });
-  await dialog.getByRole("button", { name: "Disconnect", exact: true }).click();
+  await dialog.getByRole("button", { name: /^Disconnect(?: Disconnect)?$/ }).click();
   await expect(page.getByRole("button", { name: "Connect wallet", exact: true })).toBeVisible();
   await expect.poll(async () => (await (await page.request.get("/api/studio")).json()).user).toBeNull();
 });

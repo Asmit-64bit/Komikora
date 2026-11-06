@@ -15,6 +15,7 @@ node_modules/
 
 # next.js
 /.next/
+/.next-e2e-dev/
 /out/
 
 # production
@@ -50,6 +51,7 @@ test-results/
 
 # contract deployments: only public networks are committed
 contracts/deployments/localhost.json
+contracts/deployments/editions-localhost.json
 contracts/deployments/hardhat*.json
 
 # indexer checkpoint state (contains no secrets, but is machine-local)

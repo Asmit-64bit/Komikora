@@ -8,6 +8,9 @@ export async function GET() {
   return json({
     "Chain id": envValue("NEXT_PUBLIC_CHAIN_ID") ?? "not set",
     "Marketplace contract": !!envValue("NEXT_PUBLIC_MARKETPLACE_ADDRESS"),
+    "NFT edition contract": !!envValue("NEXT_PUBLIC_EDITIONS_ADDRESS"),
+    "NFT reviewer signer": hasKey("EDITION_REVIEWER_PRIVATE_KEY"),
+    "NFT Arkiv discovery": !!(envValue("ARKIV_ACCESS_KEY") && envValue("ARKIV_WRITER_ADDRESS")),
     "Quote and personhood signer": hasKey("QUOTE_SIGNER_PRIVATE_KEY"),
     "Review reporter": hasKey("REPORTER_PRIVATE_KEY"),
     "Review relayer": hasKey("RELAYER_PRIVATE_KEY"),

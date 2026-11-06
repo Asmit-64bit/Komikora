@@ -9,6 +9,7 @@ import { parseEther } from "viem";
 import { AppError } from "@/lib/store";
 import type { PagePlaintext } from "./content";
 import { NotConfiguredError, envValue, privateKey } from "./env";
+import { privateCompletion, privateComputerConfigured } from "./private-computer";
 
 export const SCREENING_PROMPT_VERSION = "consentcraft-0g-screening-v2";
 const MAX_IMAGE_SIDE = 768; // Smaller images cost fewer vision tokens.
@@ -27,6 +28,10 @@ export type Screening = {
   zgCostNeuron: string;
   costWei: string;
   at: string;
+  assessment?: { completeness: string; legibility: string; pageOrder: string };
+  needsHumanReview?: boolean;
+  verification?: "local-signature" | "gateway-reported" | "unverified";
+  evidence?: { verification: "gateway-reported"; verdicts: Record<string, string>; osImage?: string; composeHash?: string };
 };
 
 const Verdict = z.object({
@@ -34,6 +39,8 @@ const Verdict = z.object({
   score: z.number().int().min(0).max(100),
   categories: z.array(z.string().max(40)).max(10).default([]),
   reasons: z.array(z.string().max(200)).max(5),
+  assessment: z.object({ completeness: z.enum(["clear", "issues", "uncertain"]), legibility: z.enum(["clear", "issues", "uncertain"]), pageOrder: z.enum(["clear", "issues", "uncertain"]) }).optional(),
+  needsHumanReview: z.boolean().optional(),
 }).strict();
 
 const SYSTEM_PROMPT = `You are a content-safety classifier for a comics marketplace.
@@ -43,9 +50,11 @@ Set "flagged" to true only if a page contains: sexual content involving minors; 
 sexualized depictions of real, identifiable people; content that promotes terrorism or violent extremism;
 instructions for serious crimes; or if the pages are not comic art at all (blank, noise, spam, advertisements).
 Violence, horror and mature themes in fiction are allowed.
-"score" is an advisory production-quality score from 0 to 100.
+"score" is an advisory reading-experience score from 0 to 100, not artistic merit.
+Assess completeness, text legibility and page order independently as clear, issues or uncertain.
+Set needsHumanReview true for uncertain or borderline safety decisions. Do not infer copyright or originality.
 Reply with one JSON object and nothing else:
-{"flagged": boolean, "score": integer, "categories": string[], "reasons": string[]}`;
+{"flagged": boolean, "score": integer, "categories": string[], "reasons": string[], "assessment": {"completeness":"clear|issues|uncertain","legibility":"clear|issues|uncertain","pageOrder":"clear|issues|uncertain"}, "needsHumanReview": boolean}`;
 
 function zgConfig() {
   const provider = envValue("ZG_PROVIDER_ADDRESS");
@@ -98,12 +107,14 @@ export function parseVerdict(text: string) {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start < 0 || end <= start) throw new AppError("The 0G model did not return a JSON verdict.", 502);
-  const parsed = Verdict.safeParse(JSON.parse(text.slice(start, end + 1)));
+  let value: unknown;
+  try { value = JSON.parse(text.slice(start, end + 1)); } catch { throw new AppError("The 0G model returned malformed JSON.", 502); }
+  const parsed = Verdict.safeParse(value);
   if (!parsed.success) throw new AppError("The 0G model returned a malformed verdict.", 502);
   return parsed.data;
 }
 
-export async function screenWith0G(pages: PagePlaintext[]): Promise<Screening> {
+export async function screenWith0G(pages: PagePlaintext[], options: { usePrivateComputer?: boolean } = {}): Promise<Screening> {
   const at = new Date().toISOString();
   const blank = await blankPages(pages);
   if (blank.length) {
@@ -112,6 +123,22 @@ export async function screenWith0G(pages: PagePlaintext[]): Promise<Screening> {
       provider: "deterministic", model: "blank-page-check-v1", teeVerified: false, chatId: "",
       inputTokens: 0, outputTokens: 0, zgCostNeuron: "0", costWei: "0", at,
     };
+  }
+
+  if (options.usePrivateComputer) {
+    if (!privateComputerConfigured()) throw new NotConfiguredError("0G Private Computer", ["ZG_COMPUTE_API_KEY"]);
+    const result = await privateCompletion([{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: [
+      { type: "text", text: `Review these ${pages.length} comic pages as images. Return the requested JSON.` },
+      ...await Promise.all(pages.map(async p => ({ type: "image_url", image_url: { url: await smallImage(p) } }))),
+    ] }]);
+    const verdict = parseVerdict(result.content);
+    return { score: verdict.score * 100, flagged: verdict.flagged || verdict.needsHumanReview === true,
+      reasons: verdict.reasons, assessment: verdict.assessment, needsHumanReview: verdict.needsHumanReview,
+      provider: "0G Private Computer", model: result.model, chatId: result.requestId,
+      teeVerified: result.routerVerified, verification: "gateway-reported", evidence: result.evidence,
+      inputTokens: result.inputTokens, outputTokens: result.outputTokens, at: result.at,
+      // The NFT pilot charges the creator zero. This is not a claim of zero operator cost.
+      zgCostNeuron: "unknown", costWei: "0" };
   }
 
   const cfg = zgConfig();
@@ -153,8 +180,9 @@ export async function screenWith0G(pages: PagePlaintext[]): Promise<Screening> {
   const outputTokens = usage.completion_tokens!;
   const zgCostNeuron = BigInt(inputTokens) * service.inputPrice + BigInt(outputTokens) * service.outputPrice;
   return {
-    score: verdict.score * 100, flagged: verdict.flagged, reasons: verdict.reasons,
-    provider: cfg.provider, model, teeVerified: true, chatId, inputTokens, outputTokens,
+    score: verdict.score * 100, flagged: verdict.flagged || verdict.needsHumanReview === true, reasons: verdict.reasons,
+    assessment: verdict.assessment, needsHumanReview: verdict.needsHumanReview,
+    provider: cfg.provider, model, teeVerified: true, verification: "local-signature", chatId, inputTokens, outputTokens,
     zgCostNeuron: zgCostNeuron.toString(), costWei: neuronToWei(zgCostNeuron, cfg.weiPer0G).toString(), at,
   };
 }

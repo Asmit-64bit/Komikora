@@ -5,10 +5,11 @@ import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import type { User, Project, Invitation } from "./types";
+import type { PublicationApproval } from "./approval-types";
 
 // Legacy records stay on disk for recovery, but cannot authenticate or be claimed
 // by a new wallet. Only a verified wallet session can access the studio.
-export type Account = Omit<User, "address"> & { address?: `0x${string}`; email?: string; password?: string; salt?: string };
+export type Account = Omit<User, "address"> & { address?: `0x${string}`; email?: string; password?: string; salt?: string; worldIdentity?: string };
 type LegacyInvitation = Omit<Invitation, "address"> & { email: string; address?: undefined };
 export type WalletChallenge = { id: string; address: `0x${string}`; message: string; origin: string; expires: number };
 export type Database = {
@@ -24,6 +25,12 @@ export type Database = {
   publicationSecrets?: Record<string, { wrappedKey: string; reviewReport?: unknown }>;
   /** Private appeal evidence and reviewer reasons. Only salted hashes go on chain. */
   appealNotes?: Record<string, { evidence?: { text: string; salt: string; hash: string; at: string }; reason?: { text: string; salt: string; hash: string; at: string } }>;
+  editionSecrets?: Record<string, { wrappedKey: string }>;
+  editionSubmissions?: { userId: string; at: number }[];
+  abuseReports?: { id: string; comicId: string; userId: string; text: string; at: string; status: "open" | "resolved"; response?: string }[];
+  curatorRequests?: { userId: string; at: number }[];
+  curatorSuggestions?: { key: string; at: number; result: { picks: { tokenId: string; reason: string; title: string }[]; requestId: string; model: string; at: string; promptVersion: string } }[];
+  publicationApprovals?: PublicationApproval[];
 };
 
 const namespace = process.env.CONSENTCRAFT_DATA_NAMESPACE || "studio";
@@ -72,7 +79,7 @@ export async function database<T>(fn: (db: Database) => T | Promise<T>, write = 
 
 export function id() { return randomBytes(32).toString("hex"); }
 export function publicUser(account: User): User {
-  return { id: account.id, name: account.name, address: account.address, color: account.color, ...(account.worldIdVerifiedAt ? { worldIdVerifiedAt: account.worldIdVerifiedAt } : {}) };
+  return { id: account.id, name: account.name, address: account.address, color: account.color, ...(account.worldIdVerifiedAt ? { worldIdVerifiedAt: account.worldIdVerifiedAt, worldIdEnvironment: account.worldIdEnvironment } : {}) };
 }
 export function sessionUser(db: Database, token?: string) {
   const session = token && db.sessions.find(s => s.token === token && s.auth === "wallet" && s.expires > Date.now());

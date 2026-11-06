@@ -1,5 +1,11 @@
 # ConsentCraft
 
+The NFT MVP now lives at **Marketplace** (`/marketplace`) and **Trade** (`/trade`): fixed-supply ERC-721 editions, per-edition first-sale auctions, secondary asks/auctions, comic swaps with exact ETH top-ups, and reading access that follows confirmed ownership. New publishing uses a rights declaration, World ID, encrypted Arweave content and 0G review, with no legacy publishing deposit. See [NFT rules, deployment, tests and remaining launch work](docs/NFT_MVP.md).
+
+The existing paid-reading contract and APIs documented below are retained for legacy records. Their permanent reading entitlements do not grant access to NFT editions. New NFT publications use `ConsentCraftEditions`.
+
+The NFT path includes private 0G image scoring and reading recommendations, World ID Agent Pass creator linking and per-publication consent, linked edition detail pages, and a Network service-status page. Scoring requires private routing and gateway-reported provider checks; it never falls back to standard inference. The live generated-image private scoring test passed. World client credentials, funded Arweave upload and public NFT deployment still require operator configuration; these are shown explicitly in the UI. See [current setup and verification limits](docs/NFT_MVP.md).
+
 The development environment includes the ConsentCraft UI and basic studio backend, adapted from [Asmit-64bit/consentcraft](https://github.com/Asmit-64bit/consentcraft) at commit `97057e02ddcce17035398917f73860cc64656f21`. It preserves the reference styling and layouts, plus its file-backed account, project, invitation, and image-validation flows.
 
 Choose **Connect wallet**, select your wallet in RainbowKit, and choose **Sign message**. Approve the sign-in message to open your studio; the first verified sign-in creates your account. Start a project, upload artwork, and save your draft. New wallets start with an empty workspace. Saved changes survive page reloads and server restarts. Owners manage titles, credits, shares, terms, and invitations; accepted collaborators can edit panels and captions. Invitations are addressed to a wallet and can also be shared as links.
@@ -105,11 +111,11 @@ No entities have been written yet. Both commands currently return empty results.
 | Validation/forms | Zod, React Hook Form, resolvers |
 | Client data/wallets | TanStack Query, wagmi 2, viem 2, RainbowKit 2 |
 | Personhood/catalog | World ID 4 IDKit and Arkiv TypeScript SDK |
-| AI | OpenAI-compatible client for the 0G Router; no inference calls made |
+| AI | 0G Private Computer image review and reading suggestions; private routing and gateway-reported checks |
 | Private state/jobs | PostgreSQL 17, pg, pg-boss; no application tables or jobs yet |
 | Private media | Local SeaweedFS, S3 client and presigner; private bucket initialization |
 | Contracts | Separate ESM npm workspace, Hardhat 3, viem toolbox, OpenZeppelin |
-| Tests | Backend integration suite and Playwright account/collaboration flow; Vitest available for future unit tests |
+| Tests | Vitest security/review unit tests, real-chain reader integration and Playwright wallet/collaboration/navigation checks |
 
 The copied UI uses the reference plain CSS and Arial font. Its CSS is processed natively by Next.js; the unused custom Tailwind CSS loader has been removed. shadcn tooling remains available for future components. The contract workspace is excluded from the web TypeScript build and checked separately. Dependency versions are recorded in `package-lock.json`.
 
@@ -119,7 +125,7 @@ The Node route at `/api/studio` stores accounts, sessions, projects, embedded pa
 
 | Request | Behavior |
 | --- | --- |
-| `GET /api/studio` | Current account, its team projects, and incoming invitations; public library is empty until publishing is implemented |
+| `GET /api/studio` | Current account, its team projects, and incoming invitations; NFT discovery uses `/api/editions` |
 | `GET /api/studio?invitations=<project-id>` | Pending invitations, visible only to the project owner |
 | `POST`, action `challenge` | Create a five-minute, browser-bound SIWE message for an `address` and `chainId` |
 | `POST`, action `siwe` | Verify the exact `message` and wallet `signature`, then issue a seven-day session |
@@ -162,10 +168,10 @@ Stopping services preserves their named Docker volumes. Keep database connection
 Fill only the relevant blank values in `.env.local` when integration work begins:
 
 - WalletConnect: set `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` to a valid project ID and restart the dev server (or rebuild production) to enable QR connections. Browser wallet sign-in needs no project ID.
-- World ID: registered app ID, RP ID, server signing key, and chosen action/proof flow.
-- Arkiv: selected network RPC URL and chain ID. Signing and entity renewal need implementation.
-- 0G Router: API base URL, API key, and a model verified to accept actual page images.
-- Sepolia: RPC URL, and `NEXT_PUBLIC_MARKETPLACE_ADDRESS` after `npm run contracts:deploy:sepolia`. Contract deployment settings live separately in `contracts/.env`.
+- World ID Agent Pass: registered client ID/secret, authentication method and exact HTTPS callback. Legacy IDKit uses its separate app/RP/signing settings.
+- Arkiv: selected RPC, funded indexer signing account and trusted writer address. The NFT indexer implements renewal and reconciliation; run `npm run editions:index -- --watch` after deployment.
+- 0G Private Computer: API base URL, API key and an image-capable private model. The default is `0gm-1.0-35b-a3b`; trust mode must remain `private`.
+- Sepolia NFT contract: RPC URL and `NEXT_PUBLIC_EDITIONS_ADDRESS` after `npm run editions:deploy:sepolia`. Contract deployment settings live separately in `contracts/.env`. `NEXT_PUBLIC_MARKETPLACE_ADDRESS` belongs to the retained legacy contract.
 
 Only variables prefixed `NEXT_PUBLIC_` may enter browser bundles. Keep service keys, session secrets and database credentials server-side. Configure public RPC URLs specifically for browser use. No service balances, accounts, purchases, proofs, or deployments are created by setup.
 
@@ -195,7 +201,9 @@ npm run test:e2e
 npm run contracts:test
 ```
 
-Put unit tests in `tests/unit`, integration tests in `tests/integration`, browser tests in `tests/e2e`, Solidity sources in `contracts/contracts`, and contract tests in `contracts/test`. Vitest has no unit tests yet; use `test:backend` for the API suite. Playwright starts an isolated production server on port 3100 and leaves its ignored `.data/e2e-*` namespace available for debugging. The interface uses system fonts and bundled SVG artwork, so it does not require remote font or image downloads.
+Put unit tests in `tests/unit`, integration tests in `tests/integration`, browser tests in `tests/e2e`, Solidity sources in `contracts/contracts`, and contract tests in `contracts/test`. `npm test` runs Vitest; `test:backend` runs the studio API suite. Playwright starts an isolated production server on port 3100 and leaves its ignored `.data/e2e-*` namespace available for debugging. The interface uses system fonts and bundled SVG artwork, so it does not require remote font or image downloads.
+
+Set `PLAYWRIGHT_DEV=1` to run the same browser suite with Turbopack development diagnostics. It uses `.next-e2e-dev` and an isolated data namespace so an existing studio server can keep running. The provider regression checks fresh loads of the studio, Marketplace and Trade, plus wallet selection, for prerender and hydration errors.
 
 ## Verified setup
 
@@ -206,6 +214,5 @@ Vitest and Playwright load their configurations, and Chromium successfully opene
 UI with HTTP 200. PostgreSQL connectivity and S3 write/read/delete were verified;
 anonymous S3 object access returned HTTP 403. The local service containers are running.
 
-External World ID, Arkiv, and 0G integrations remain unconnected in the UI.
-Those services and real WalletConnect QR connections have not been exercised. `npm run dev` starts the app;
+The UI exposes World ID, Arkiv and 0G paths and reports missing configuration. Live private 0G image scoring and catalog checks passed; live World ID browser consent, Arweave publishing, Arkiv indexing of a public NFT deployment and WalletConnect QR still require verification. `npm run dev` starts the app;
 `npm run services:down` stops the local services while preserving data.

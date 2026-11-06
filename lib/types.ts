@@ -1,4 +1,4 @@
-export type User = { id: string; name: string; color: string; address: `0x${string}`; worldIdVerifiedAt?: string };
+export type User = { id: string; name: string; color: string; address: `0x${string}`; worldIdVerifiedAt?: string; worldIdEnvironment?: string };
 export type Member = { userId: string; name: string; role: string; share: number; address?: string };
 export type Panel = { image: string; dialogue: string; alt: string };
 export type Project = {
@@ -12,6 +12,16 @@ export type Project = {
   chainError?: string;
   publicationId?: string;
   publication?: PublicationView;
+  edition?: EditionPublication;
+};
+export type EditionPublication = {
+  key: `0x${string}`; manifestHash: `0x${string}`; bundleTxId: string; coverTxId: string;
+  supply: number; license: string; rightsAt: string; status: "uploaded" | "flagged" | "approved" | "minted";
+  chainId: number; contract: `0x${string}`; comicId?: string; uri?: string; metadataHash?: `0x${string}`;
+  permitExpiresAt?: number;
+  reserveWei?: string; auctionDuration?: number; approvalId?: string;
+  review?: { score: number; flagged: boolean; reasons: string[]; model: string; provider: string; teeVerified: boolean; at: string; promptVersion: string; uncertainty: string; requestId?: string; verification?: string; evidence?: { verification: "gateway-reported"; verdicts: Record<string, string>; osImage?: string; composeHash?: string }; assessment?: { completeness: string; legibility: string; pageOrder: string } };
+  error?: string; appeal?: { text: string; at: string; deadline: string; decision?: "approved" | "rejected"; reason?: string; reviewer?: string };
 };
 export type ChainReview = {
   salt: `0x${string}`; projectKey: `0x${string}`; chainId: number; contract: `0x${string}`;

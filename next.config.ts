@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Isolate development browser tests from an already-running local studio.
+  distDir: process.env.CONSENTCRAFT_E2E_DEV === "1" ? ".next-e2e-dev" : ".next",
   /* config options here */
   experimental: {
     agentFeedback: true,
