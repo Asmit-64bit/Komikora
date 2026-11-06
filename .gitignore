@@ -54,3 +54,6 @@ contracts/deployments/hardhat*.json
 
 # indexer checkpoint state (contains no secrets, but is machine-local)
 indexer/.state/
+
+# Local studio accounts, sessions, artwork, and drafts
+/.data/

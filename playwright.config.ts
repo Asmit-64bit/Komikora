@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { randomUUID } from "node:crypto";
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -9,12 +10,15 @@ export default defineConfig({
   use: {
     baseURL: "http://127.0.0.1:3100",
     trace: "on-first-retry",
+    actionTimeout: 10_000,
+    navigationTimeout: 20_000,
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: "npm run dev -- --hostname 127.0.0.1 --port 3100",
+    command: "node node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3100",
     url: "http://127.0.0.1:3100",
-    reuseExistingServer: !process.env.CI,
+    env: { CONSENTCRAFT_DATA_NAMESPACE: `e2e-${randomUUID()}` },
+    reuseExistingServer: false,
     timeout: 120_000,
   },
 });
