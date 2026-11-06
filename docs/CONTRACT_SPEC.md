@@ -18,11 +18,11 @@ Items marked **[OPEN]** are provisional defaults that still need a decision; see
 | Liability views (`totalCredits`, `totalLockedDeposits`, `totalLiabilities`, `liabilitiesCovered`), direct-ETH rejection | Implemented |
 | `submitReviewReport`, `appeal`, `resolveAppeal`, `finalizeRejection`, `claimAppealTimeout`, Rejected/AppealTimeout settlement, credits | Implemented |
 | `publish`, `purchase`, ThresholdReached settlement, `hasReadingAccess`, `saleFee`, `isRequestIdUsed` | Implemented |
-| `refundAndDelist`, `withdraw`, `previewSettlement` | Not yet implemented |
+| `refundAndDelist`, `withdraw`, `previewSettlement` | Implemented |
+
+Every function in `IConsentCraftMarket` exists, and the contract now inherits it directly. Test-only helper contracts live in `contracts/contracts/test/` and are never deployed.
 
 The build enables the Solidity optimizer (200 runs). Without it the runtime bytecode exceeds the 24,576-byte EIP-170 limit and can't be deployed to Sepolia. A test asserts the deployed size stays under the limit.
-
-Until every function exists, the contract inherits `IConsentCraftMarketTypes` rather than `IConsentCraftMarket`, so it has no stub functions.
 
 ## 1. System boundaries
 
@@ -172,8 +172,8 @@ Time boundaries follow the report:
 | `claimAppealTimeout(id)` | Anyone | AppealPending, `now >= appealResolutionDeadline` | Rejected and settled (`AppealTimeout`: author gets S − A) | Allowed |
 | `publish` | Author | Approved, Unlisted | Published, Listed; `publishedAt` and `refundEligibleAt` set once | Allowed |
 | `purchase` | Buyer | Published and Listed; `msg.value == price`; non-zero, unused `requestId`; buyer not entitled; valid PURCHASE certificate if the policy requires one | Entitlement; `R += P`; `f(P)` credited to the owner and `P − f(P)` to the author; if the deposit is unsettled and `R >= S`, settles (`ThresholdReached`: owner gets S − A). Listing stays active. | **Blocked** |
-| `refundAndDelist(id, minRefund)` | Author | Published and Listed; `now >= publishedAt + refundDelay`; `R < S`; deposit unsettled; `F >= minRefund` | Delisted, settles (`AuthorRefund`) | Allowed |
-| `withdraw` | Credit holder | Credit > 0 | Sends the full credit (`nonReentrant`, checks-effects-interactions) | Allowed |
+| `refundAndDelist(id, minRefund)` | Author | Published; Listed; deposit unsettled (`DepositAlreadySettled`); `R < S`; `now >= refundEligibleAt` (`RefundNotYetAvailable`); `F >= minRefund` (`RefundBelowMinimum`) | Delisted with `delistedAt`; settles (`AuthorRefund`): F to the author, O to the owner, locked −= F + O. Review state stays Published; frozen terms and Arweave IDs unchanged. | Allowed |
+| `withdraw` | Credit holder | Credit > 0 (`NothingToWithdraw`) | Zeroes the credit, then sends it via `call`. `nonReentrant`. A failed transfer reverts with `WithdrawalFailed` and the credit is preserved. | Allowed |
 
 Pausing blocks only new deposits and purchases. Review, appeals, publishing, refunds and withdrawals keep working, so pausing never traps funds or makes a deadline pass unfairly. Deadlines keep running while the contract is paused.
 
@@ -276,7 +276,9 @@ According to the [Arweave HTTP API docs](https://docs.arweave.org/developers/arw
 ## 11. Security notes
 
 - Checks-effects-interactions everywhere. `nonReentrant` on every function that sends ETH.
-- `withdraw` uses `call`, and a failure reverts and preserves the credit. A recipient that rejects ETH blocks only its own withdrawal.
+- `withdraw` uses `call`, and a failure reverts and preserves the credit. A recipient that rejects ETH blocks only its own withdrawal. Credits already earned by a rejecting address stay with it after the recipient changes; only that address can withdraw them, once it accepts ETH.
+- `previewSettlement(id)` returns `(D, F, O)` for an AuthorRefund using the current R and A. The UI passes its F as `minRefund`.
+- The report's accounting examples are tested literally in wei (S=100): (R=0, A=10) gives F=75, O=15; (60, 10) gives 40, 50; (20, 40) gives 60, 0; and the threshold case (100, 10) gives 0, 90. `ceil(S/4)` is tested for S = 1–5, 100–104 and 10^18 + 1.
 - Arithmetic is checked (0.8.x).
 - A reviewer should be separate from the financial beneficiary where feasible. The owner gains from rejections, which is a governance risk the report says must be disclosed.
 

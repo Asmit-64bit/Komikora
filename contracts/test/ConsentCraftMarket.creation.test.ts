@@ -125,6 +125,7 @@ describe("ConsentCraftMarket: policies, roles and publication creation", () => {
         "pause",
         "publish",
         "purchase",
+        "refundAndDelist",
         "renounceRole",
         "resolveAppeal",
         "revokeRole",
@@ -132,6 +133,7 @@ describe("ConsentCraftMarket: policies, roles and publication creation", () => {
         "setOwnerRecipient",
         "submitReviewReport",
         "unpause",
+        "withdraw",
       ]);
     });
 

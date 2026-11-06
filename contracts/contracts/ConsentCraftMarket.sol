@@ -3,19 +3,19 @@ pragma solidity 0.8.28;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
-import {IConsentCraftMarketTypes} from "./interfaces/IConsentCraftMarketTypes.sol";
+import {IConsentCraftMarket} from "./interfaces/IConsentCraftMarket.sol";
 
 /// @title ConsentCraftMarket
 /// @notice Contract layer for the ConsentCraft paid comic marketplace on Sepolia.
 /// @dev Implementation status: policies, roles, recipients, pausing, liability
 /// accounting, publication creation, review reports, appeals, rejection/timeout
-/// settlement, publishing, purchases, threshold settlement and reading access.
-/// Refunds and withdrawals are not implemented yet; see docs/CONTRACT_SPEC.md.
-/// Once they are, this contract inherits IConsentCraftMarket instead of the types-only base.
-contract ConsentCraftMarket is IConsentCraftMarketTypes, AccessControl, Pausable, EIP712 {
+/// settlement, publishing, purchases, threshold settlement, reading access,
+/// author refunds with delisting, and pull-payment withdrawals. See docs/CONTRACT_SPEC.md.
+contract ConsentCraftMarket is IConsentCraftMarket, AccessControl, Pausable, ReentrancyGuard, EIP712 {
     // ---------------------------------------------------------------------
     // Roles and EIP-712 type hashes
     // ---------------------------------------------------------------------
@@ -372,6 +372,50 @@ contract ConsentCraftMarket is IConsentCraftMarketTypes, AccessControl, Pausable
     }
 
     // ---------------------------------------------------------------------
+    // Refunds and withdrawals
+    // ---------------------------------------------------------------------
+
+    /// @notice Author delists and settles the deposit with reason AuthorRefund.
+    /// Not pausable: exits must always work. Delisting only stops new sales; the frozen
+    /// terms, including both Arweave IDs, and every existing entitlement are untouched.
+    /// @param minRefund Smallest acceptable F, protecting the author against a purchase
+    /// that raises R (and so lowers F) between preview and execution.
+    function refundAndDelist(uint256 publicationId, uint256 minRefund) external {
+        Publication storage p = _existing(publicationId);
+        if (msg.sender != p.author) revert NotAuthor(publicationId, msg.sender);
+        _requireState(publicationId, p, PublicationState.Published);
+        if (p.listingState != ListingState.Listed) revert InvalidListingState(publicationId, p.listingState);
+        if (p.settlementReason != SettlementReason.None) revert DepositAlreadySettled(publicationId, p.settlementReason);
+        // Unreachable while the threshold settles on the purchase that reaches it; kept as a guard.
+        if (p.grossSales >= p.deposit) revert SalesReachedDeposit(publicationId, p.grossSales, p.deposit);
+        if (block.timestamp < p.refundEligibleAt) revert RefundNotYetAvailable(publicationId, p.refundEligibleAt);
+
+        (, uint256 authorRefund, uint256 ownerAllocation) = _authorRefundSplit(p);
+        if (authorRefund < minRefund) revert RefundBelowMinimum(authorRefund, minRefund);
+
+        // Disable sales first, then settle; both happen in this transaction.
+        p.listingState = ListingState.Delisted;
+        p.delistedAt = uint64(block.timestamp);
+        emit PublicationDelisted(publicationId);
+        _settle(publicationId, p, SettlementReason.AuthorRefund, authorRefund, ownerAllocation);
+    }
+
+    /// @notice Sends the caller's entire credit. Pull payments only; works while paused.
+    /// @dev Checks-effects-interactions plus nonReentrant. A failed transfer reverts the
+    /// whole call, so the credit is preserved.
+    function withdraw() external nonReentrant {
+        uint256 amount = _credits[msg.sender];
+        if (amount == 0) revert NothingToWithdraw();
+
+        _credits[msg.sender] = 0;
+        totalCredits -= amount;
+
+        (bool ok,) = payable(msg.sender).call{value: amount}("");
+        if (!ok) revert WithdrawalFailed(msg.sender, amount);
+        emit Withdrawn(msg.sender, amount);
+    }
+
+    // ---------------------------------------------------------------------
     // Views
     // ---------------------------------------------------------------------
 
@@ -417,6 +461,16 @@ contract ConsentCraftMarket is IConsentCraftMarketTypes, AccessControl, Pausable
     /// author check unless they buy a copy.
     function hasReadingAccess(uint256 publicationId, address wallet) external view returns (bool) {
         return _entitled[publicationId][wallet];
+    }
+
+    /// @notice D, F and O an AuthorRefund settlement would produce now, from the current R and A.
+    /// Informational for any state; refundAndDelist enforces eligibility separately.
+    function previewSettlement(uint256 publicationId)
+        external
+        view
+        returns (uint256 retained, uint256 authorRefund, uint256 ownerAllocation)
+    {
+        return _authorRefundSplit(_existing(publicationId));
     }
 
     /// @notice f(P) = max(minFee, floor(P * feeBps / 10000)) under a policy.
@@ -466,6 +520,24 @@ contract ConsentCraftMarket is IConsentCraftMarketTypes, AccessControl, Pausable
     function _hasRoleSignature(bytes32 role, bytes32 digest, bytes calldata signature) internal view returns (bool) {
         (address signer, ECDSA.RecoverError err,) = ECDSA.tryRecover(digest, signature);
         return err == ECDSA.RecoverError.NoError && hasRole(role, signer);
+    }
+
+    /// @dev D = min(S, max(R, A, Q)) with Q = ceil(S / 4); F = S - D; O = D - A.
+    /// A was credited at review, so it is not deducted again: F + O = S - A.
+    function _authorRefundSplit(Publication storage p)
+        private
+        view
+        returns (uint256 retained, uint256 authorRefund, uint256 ownerAllocation)
+    {
+        uint256 s = p.deposit;
+        uint256 a = p.aiCost;
+        uint256 q = s / 4 + (s % 4 == 0 ? 0 : 1); // ceil without overflow
+        retained = p.grossSales;
+        if (a > retained) retained = a;
+        if (q > retained) retained = q;
+        if (retained > s) retained = s;
+        authorRefund = s - retained;
+        ownerAllocation = retained - a;
     }
 
     /// @dev f(P) <= P for every listed price, because feeBps <= 10000 and price >= minPrice > minFee.

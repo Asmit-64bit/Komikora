@@ -299,6 +299,7 @@ interface IConsentCraftMarketTypes {
     error RefundNotYetAvailable(uint256 publicationId, uint64 refundEligibleAt);
     error DepositAlreadySettled(uint256 publicationId, SettlementReason reason);
     error RefundBelowMinimum(uint256 refund, uint256 minRefund);
+    error SalesReachedDeposit(uint256 publicationId, uint256 grossSales, uint256 deposit);
 
     error PaymentMismatch(uint256 expected, uint256 received);
     error ZeroRequestId();
