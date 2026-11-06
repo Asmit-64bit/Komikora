@@ -34,6 +34,7 @@ test("accounts, saved artwork, invitations, collaboration, and conflict recovery
   await create.getByRole("button", { name: "Create project", exact: true }).click();
   await page.waitForURL(/\/projects\//);
   const projectUrl = page.url();
+  await main(page).getByRole("radio", { name: "Upload images one by one", exact: true }).click();
   const art = await sharp({ create: { width: 200, height: 160, channels: 3, background: "#c6b3ed" } }).png().toBuffer();
   await main(page).getByLabel("Upload artwork for panel 1").setInputFiles({ name: "panel.png", mimeType: "image/png", buffer: art });
   await main(page).getByLabel("Dialogue or caption").fill("Saved beyond a reload.");

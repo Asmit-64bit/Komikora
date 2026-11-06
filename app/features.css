@@ -296,7 +296,7 @@
 .empty-state p,
 .modal-description {
   font-family: var(--font-lead);
-  font-weight: 300;
+  font-weight: 400;
   font-optical-sizing: auto;
   letter-spacing: -0.005em;
   line-height: 1.45;

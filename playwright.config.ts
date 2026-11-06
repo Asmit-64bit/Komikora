@@ -11,6 +11,8 @@ export default defineConfig({
   reporter: "list",
   use: {
     baseURL: "http://127.0.0.1:3100",
+    // Keep the animated WebGL backdrop from competing with parallel browser sessions.
+    reducedMotion: "reduce",
     trace: "on-first-retry",
     actionTimeout: 10_000,
     navigationTimeout: development ? 120_000 : 20_000,
@@ -18,7 +20,7 @@ export default defineConfig({
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
     command: `node node_modules/next/dist/bin/next ${development ? "dev --turbopack" : "start"} --hostname 127.0.0.1 --port 3100`,
-    url: "http://127.0.0.1:3100",
+    url: "http://127.0.0.1:3100/api/studio",
     env: { CONSENTCRAFT_DATA_NAMESPACE: `e2e-${randomUUID()}`, APP_ORIGIN: "http://127.0.0.1:3100", RATE_LIMIT_MULTIPLIER: "100", ...(development ? { CONSENTCRAFT_E2E_DEV: "1" } : {}) },
     reuseExistingServer: false,
     timeout: development ? 180_000 : 120_000,
