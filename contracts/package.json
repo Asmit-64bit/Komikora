@@ -12,6 +12,12 @@
     "compile": "node ../node_modules/hardhat/dist/src/cli.js build",
     "node": "node ../node_modules/hardhat/dist/src/cli.js node --hostname 127.0.0.1",
     "test": "node ../node_modules/hardhat/dist/src/cli.js test",
-    "typecheck": "node ../node_modules/hardhat/dist/src/cli.js build --quiet && node ../node_modules/typescript/bin/tsc --noEmit"
+    "typecheck": "node ../node_modules/hardhat/dist/src/cli.js build --quiet && node ../node_modules/typescript/bin/tsc --noEmit",
+    "abi:export": "node ../node_modules/hardhat/dist/src/cli.js run scripts/export-abi.ts",
+    "deploy:sepolia": "node --env-file-if-exists=.env ../node_modules/hardhat/dist/src/cli.js run --network sepolia scripts/deploy.ts",
+    "smoke:sepolia": "node --env-file-if-exists=.env ../node_modules/hardhat/dist/src/cli.js run --network sepolia scripts/smoke-sepolia.ts",
+    "verify:sepolia": "node --env-file-if-exists=.env ../node_modules/hardhat/dist/src/cli.js verify --network sepolia",
+    "deploy:local": "node --env-file=local-node.env ../node_modules/hardhat/dist/src/cli.js run --network localhost scripts/deploy.ts",
+    "smoke:local": "node --env-file=local-node.env ../node_modules/hardhat/dist/src/cli.js run --network localhost scripts/smoke-sepolia.ts"
   }
 }

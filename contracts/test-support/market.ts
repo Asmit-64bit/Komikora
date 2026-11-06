@@ -12,96 +12,35 @@ type Connection = Awaited<ReturnType<typeof network.create>>;
 export type Viem = Connection["viem"];
 type WalletClient = Awaited<ReturnType<Viem["getWalletClients"]>>[number];
 
-export const EIP712_NAME = "ConsentCraftMarket";
-export const EIP712_VERSION = "1";
+export {
+  EIP712_NAME,
+  EIP712_VERSION,
+  PUBLICATION_QUOTE_TYPES as QUOTE_TYPES,
+  PERSONHOOD_CERTIFICATE_TYPES as CERTIFICATE_TYPES,
+  REVIEW_REPORT_TYPES as REPORT_TYPES,
+} from "../lib/eip712.js";
+import {
+  PUBLICATION_QUOTE_TYPES as QUOTE_TYPES,
+  PERSONHOOD_CERTIFICATE_TYPES as CERTIFICATE_TYPES,
+  REVIEW_REPORT_TYPES as REPORT_TYPES,
+  marketDomain,
+  PersonhoodAction,
+  type PublicationQuote,
+  type PersonhoodCertificate,
+  type ReviewReport,
+} from "../lib/eip712.js";
 
-export const Action = { Publish: 0, Purchase: 1 } as const;
+export const Action = PersonhoodAction;
 
-export const QUOTE_TYPES = {
-  PublicationQuote: [
-    { name: "author", type: "address" },
-    { name: "manifestHash", type: "bytes32" },
-    { name: "previewManifestHash", type: "bytes32" },
-    { name: "arweaveBundleTxId", type: "bytes32" },
-    { name: "arweavePreviewTxId", type: "bytes32" },
-    { name: "pageCount", type: "uint32" },
-    { name: "policyId", type: "uint256" },
-    { name: "price", type: "uint256" },
-    { name: "deposit", type: "uint256" },
-    { name: "aiCap", type: "uint256" },
-    { name: "ratingSnapshot", type: "uint8" },
-    { name: "expiresAt", type: "uint64" },
-    { name: "nonce", type: "uint256" },
-  ],
-} as const;
-
-export const CERTIFICATE_TYPES = {
-  PersonhoodCertificate: [
-    { name: "wallet", type: "address" },
-    { name: "action", type: "uint8" },
-    { name: "expiresAt", type: "uint64" },
-    { name: "nonce", type: "uint256" },
-  ],
-} as const;
-
-export const REPORT_TYPES = {
-  ReviewReport: [
-    { name: "publicationId", type: "uint256" },
-    { name: "manifestHash", type: "bytes32" },
-    { name: "arweaveBundleTxId", type: "bytes32" },
-    { name: "reportHash", type: "bytes32" },
-    { name: "modelVersion", type: "bytes32" },
-    { name: "promptVersion", type: "bytes32" },
-    { name: "policyId", type: "uint256" },
-    { name: "score", type: "uint16" },
-    { name: "flagged", type: "bool" },
-    { name: "aiCost", type: "uint256" },
-    { name: "jobId", type: "bytes32" },
-  ],
-} as const;
-
-export type Report = {
-  publicationId: bigint;
-  manifestHash: Hex;
-  arweaveBundleTxId: Hex;
-  reportHash: Hex;
-  modelVersion: Hex;
-  promptVersion: Hex;
-  policyId: bigint;
-  score: number;
-  flagged: boolean;
-  aiCost: bigint;
-  jobId: Hex;
-};
+export type Report = ReviewReport;
+export type Quote = PublicationQuote;
+export type Certificate = PersonhoodCertificate;
 
 /** Mirrors the contract's PublicationState enum. */
 export const State = { Deposited: 0, Flagged: 1, AppealPending: 2, Approved: 3, Published: 4, Rejected: 5 } as const;
 export const Settlement = { None: 0, Rejected: 1, AppealTimeout: 2, ThresholdReached: 3, AuthorRefund: 4 } as const;
 export const Credit = { SaleProceeds: 0, PlatformFee: 1, AiExpense: 2, DepositRefund: 3, OwnerAllocation: 4 } as const;
 export const Path = { Report: 0, Appeal: 1 } as const;
-
-export type Quote = {
-  author: Address;
-  manifestHash: Hex;
-  previewManifestHash: Hex;
-  arweaveBundleTxId: Hex;
-  arweavePreviewTxId: Hex;
-  pageCount: number;
-  policyId: bigint;
-  price: bigint;
-  deposit: bigint;
-  aiCap: bigint;
-  ratingSnapshot: number;
-  expiresAt: bigint;
-  nonce: bigint;
-};
-
-export type Certificate = {
-  wallet: Address;
-  action: number;
-  expiresAt: bigint;
-  nonce: bigint;
-};
 
 export type PolicyInput = {
   minFee: bigint;
@@ -161,9 +100,7 @@ export async function deployMarket(viem: Viem) {
   return { market, publicClient, chainId, admin, owner, aiRecipient, quoteSigner, author, other, pauser, reporter, reviewer };
 }
 
-export function domainFor(chainId: number, verifyingContract: Address) {
-  return { name: EIP712_NAME, version: EIP712_VERSION, chainId, verifyingContract } as const;
-}
+export const domainFor = marketDomain;
 
 export function signQuote(signer: WalletClient, chainId: number, market: Address, quote: Quote) {
   return signer.signTypedData({

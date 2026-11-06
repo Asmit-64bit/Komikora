@@ -1,6 +1,6 @@
 # ConsentCraft development environment
 
-Environment setup only. The Next.js starter screen is unchanged. Marketplace routes, authentication, AI review, database schemas, workers, and financial contracts are not implemented.
+The Next.js starter screen is unchanged. Marketplace routes, authentication, AI review, database schemas and workers are not implemented. The **ConsentCraftMarket contract** is implemented and tested but not yet deployed: see [contracts/README.md](contracts/README.md) for setup, testing, Sepolia deployment, verification and known limitations.
 
 ## Prerequisites
 
@@ -27,7 +27,7 @@ the React 19-compatible `use-sync-external-store` 1.4 shim.
 Open http://localhost:3000. The starter can run without Docker or external credentials.
 `env:setup` creates an ignored `.env.local`, generates a random session secret, and preserves an existing file. Placeholder settings are not yet consumed by application features.
 
-Run `npm run contracts:node` in another terminal when a local EVM is needed. The chain listens on 127.0.0.1:8545 with chain ID 31337 and disposable test accounts. No public-chain deployment command or deployer key is configured.
+Run `npm run contracts:node` in another terminal when a local EVM is needed. The chain listens on 127.0.0.1:8545 with chain ID 31337 and disposable test accounts. Sepolia deployment commands and their environment (`contracts/.env.example`) are documented in [contracts/README.md](contracts/README.md).
 
 ## Tooling
 
@@ -70,7 +70,7 @@ Fill only the relevant blank values in `.env.local` when integration work begins
 - World ID: registered app ID, RP ID, server signing key, and chosen action/proof flow.
 - Arkiv: selected network RPC URL and chain ID. Signing and entity renewal need implementation.
 - 0G Router: API base URL, API key, and a model verified to accept actual page images.
-- Sepolia: RPC URL and deployed marketplace address after contracts exist.
+- Sepolia: RPC URL, and `NEXT_PUBLIC_MARKETPLACE_ADDRESS` after `npm run contracts:deploy:sepolia`. Contract deployment settings live separately in `contracts/.env`.
 
 Only variables prefixed `NEXT_PUBLIC_` may enter browser bundles. Keep service keys, session secrets and database credentials server-side. Configure public RPC URLs specifically for browser use. No service balances, accounts, purchases, proofs, or deployments are created by setup.
 
@@ -84,7 +84,7 @@ npm run build
 npm run contracts:compile
 ```
 
-`contracts:compile` currently validates the empty workspace and downloads the configured Solidity compiler as needed. It does not establish any contract behavior.
+`contracts:compile` builds ConsentCraftMarket with solc 0.8.28 (optimizer on) and downloads the compiler as needed.
 
 Test commands are ready for future implementation:
 
@@ -100,8 +100,8 @@ Put unit tests in `tests/unit`, integration tests in `tests/integration`, browse
 
 ## Verified setup
 
-Lint, web and contract TypeScript checks, and the production build pass. Hardhat loads
-its configuration and Solidity 0.8.28 compiler; the workspace has no contracts or tests yet.
+Lint, web and contract TypeScript checks, and the production build pass. The contract
+suite (unit, fuzz and invariant tests) passes, and a local deploy and smoke run succeeded.
 Vitest and Playwright load their configurations, and Chromium successfully opened the
 starter with HTTP 200. PostgreSQL connectivity and S3 write/read/delete were verified;
 anonymous S3 object access returned HTTP 403. The local service containers are running.

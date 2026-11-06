@@ -47,3 +47,7 @@ contracts/cache/
 contracts/coverage/
 playwright-report/
 test-results/
+
+# contract deployments: only public networks are committed
+contracts/deployments/localhost.json
+contracts/deployments/hardhat*.json

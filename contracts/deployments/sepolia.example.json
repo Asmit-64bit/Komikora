@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "network": "sepolia",
+  "chainId": 11155111,
+  "contract": "ConsentCraftMarket",
+  "address": "0x0000000000000000000000000000000000000000",
+  "deployer": "0x0000000000000000000000000000000000000000",
+  "transactionHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "blockNumber": "0",
+  "deployedAt": "1970-01-01T00:00:00.000Z",
+  "startBlock": "0",
+  "constructorArgs": [
+    "0x0000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000"
+  ],
+  "admin": "0x0000000000000000000000000000000000000000",
+  "ownerRecipient": "0x0000000000000000000000000000000000000000",
+  "aiExpenseRecipient": "0x0000000000000000000000000000000000000000",
+  "roles": {
+    "QUOTE_SIGNER_ROLE": ["0x0000000000000000000000000000000000000000"],
+    "REPORTER_ROLE": ["0x0000000000000000000000000000000000000000"],
+    "REVIEWER_ROLE": ["0x0000000000000000000000000000000000000000"],
+    "PAUSER_ROLE": ["0x0000000000000000000000000000000000000000"]
+  },
+  "policies": [
+    {
+      "id": "1",
+      "label": "SAMPLE demo policy - testnet values, not approved launch configuration",
+      "minFee": "10000000000000",
+      "minPrice": "100000000000000",
+      "maxPrice": "10000000000000000",
+      "feeBps": 500,
+      "appealDuration": "120",
+      "appealResolutionDuration": "300",
+      "refundDelay": "300",
+      "purchaseRequiresPersonhood": true
+    }
+  ],
+  "eip712": { "name": "ConsentCraftMarket", "version": "1" },
+  "compiler": { "solc": "0.8.28", "optimizer": { "enabled": true, "runs": 200 } },
+  "abi": "abi/ConsentCraftMarket.json"
+}
