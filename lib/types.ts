@@ -1,4 +1,4 @@
-export type User = { id: string; name: string; email: string; color: string; address?: string };
+export type User = { id: string; name: string; color: string; address: `0x${string}` };
 export type Member = { userId: string; name: string; role: string; share: number; address?: string };
 export type Panel = { image: string; dialogue: string; alt: string };
 export type Project = {
@@ -21,6 +21,6 @@ export type ChainReview = {
 };
 export type ChainTransaction = { hash: `0x${string}`; action: string; actor: string; at: string; status: "submitted" | "confirmed" | "reverted" | "replaced"; nonce: number; blockNumber?: string; blockHash?: string; transactionIndex?: number; replaces?: string };
 export type ChainConfig = { chainId: number; name: string; contract?: `0x${string}`; configured: boolean; confirmations: number; storage: "local" | "ipfs"; deploymentTransaction?: string; error?: string };
-export type Invitation = { id: string; projectId: string; email: string; expiresAt: string; accepted: boolean };
+export type Invitation = { id: string; projectId: string; address: `0x${string}`; expiresAt: string; accepted: boolean };
 export type IncomingInvitation = Invitation & { projectTitle: string; ownerName: string };
 export type AppData = { user: User | null; projects: Project[]; comics: Project[]; invitations: IncomingInvitation[] };

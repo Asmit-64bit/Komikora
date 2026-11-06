@@ -2,9 +2,9 @@
 
 The development environment includes the ConsentCraft UI and basic studio backend, adapted from [Asmit-64bit/consentcraft](https://github.com/Asmit-64bit/consentcraft) at commit `97057e02ddcce17035398917f73860cc64656f21`. It preserves the reference styling and layouts, plus its file-backed account, project, invitation, and image-validation flows.
 
-Create an account from **Join the studio**, start a project, upload artwork, and save your draft. Accounts start with an empty workspace. Saved changes survive page reloads and server restarts. Owners manage titles, credits, shares, terms, and invitations; accepted collaborators can edit panels and captions. Invitations appear in the recipient's account and can also be shared as links.
+Choose **Connect wallet**, select your wallet in RainbowKit, and choose **Sign message**. Approve the sign-in message to open your studio; the first verified sign-in creates your account. Start a project, upload artwork, and save your draft. New wallets start with an empty workspace. Saved changes survive page reloads and server restarts. Owners manage titles, credits, shares, terms, and invitations; accepted collaborators can edit panels and captions. Invitations are addressed to a wallet and can also be shared as links.
 
-Wallet sign-in, AI review, onchain consent, publishing, purchases, and withdrawals remain unconnected. The backend does not implement the reference repository's NFT economics or send email.
+Authentication is wallet-only. Email/password forms and login endpoints are disabled. AI review, onchain consent, publishing, purchases, and withdrawals remain unconnected. The backend does not implement the reference repository's NFT economics or send email.
 
 ## Prerequisites
 
@@ -58,15 +58,25 @@ The Node route at `/api/studio` stores accounts, sessions, projects, embedded pa
 | --- | --- |
 | `GET /api/studio` | Current account, its team projects, and incoming invitations; public library is empty until publishing is implemented |
 | `GET /api/studio?invitations=<project-id>` | Pending invitations, visible only to the project owner |
-| `POST`, action `signup`, `login`, `logout` | Email/password accounts and seven-day sessions |
+| `POST`, action `challenge` | Create a five-minute, browser-bound SIWE message for an `address` and `chainId` |
+| `POST`, action `siwe` | Verify the exact `message` and wallet `signature`, then issue a seven-day session |
+| `POST`, action `logout` | Revoke the session and pending sign-in challenge |
 | `POST`, action `create`, `save` | Private drafts with four panels, credits, terms, and activity |
-| `POST`, action `invite`, `cancelInvite`, `accept` | Owner-created, email-bound invitations, expiring after seven days and accepted once |
+| `POST`, action `invite`, `cancelInvite`, `accept` | Owner-created invitations bound to an Ethereum `address`, expiring after seven days and accepted once |
 
-POST requests require JSON and a matching browser `Origin`. Passwords are salted and hashed using scrypt. Session cookies are HTTP-only, SameSite Strict, and Secure on HTTPS. Responses are never cached. Saves require the current `revision`; competing saves return HTTP 409 rather than overwrite another contributor's work. The editor keeps unsaved text after a conflict until the user chooses **Reload latest**.
+POST requests require JSON and a matching browser `Origin`. The server creates an [ERC-4361 Sign-In with Ethereum](https://eips.ethereum.org/EIPS/eip-4361) message containing the site, address, chain, nonce, issued time, and expiration. It verifies the signature with Viem against the exact stored message and the browser's HTTP-only challenge cookie. Each challenge is consumed on the first verification attempt, including failed signatures. Connecting or supplying an address alone never authenticates a user.
+
+Session and challenge cookies are HTTP-only, SameSite Strict, and Secure on HTTPS. Responses are never cached. Wallet switching or disconnecting clears the active studio session; signing out also disconnects the wallet connector. A returning wallet resolves to the same account. No private key is requested or stored, and sign-in submits no transaction. RainbowKit supplies wallet selection, signature verification screens, and the account menu. Installed EIP-6963 wallets and the standard injected Ethereum provider work without a WalletConnect project ID, including a wallet's mobile browser. Setting `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` enables Rainbow, MetaMask, and WalletConnect QR connectors. This implementation verifies regular externally owned Ethereum accounts locally; smart-contract wallet signatures are not implemented.
+
+The Next.js configuration externalizes the transitive `@coinbase/cdp-sdk` on the server. This preserves its lazy optional payment imports without requiring unrelated x402 packages for RainbowKit's connector bundle.
+
+Legacy email-only accounts, drafts, and invitations are retained on disk for recovery. Old sessions are rejected, and new wallets cannot claim an email account or its drafts. Any deliberate migration of legacy drafts must be handled separately with verified ownership; there is no automatic linking.
+
+Saves require the current `revision`; competing saves return HTTP 409 rather than overwrite another contributor's work. The editor keeps unsaved text after a conflict until the user chooses **Reload latest**.
 
 Uploads are fully decoded on the server with Sharp, checked as PNG/JPEG under 20 megapixels, resized to at most 1400 pixels, and re-encoded without metadata. Draft saves validate the full payload before an atomic file replacement. Owners' shares must total 100%; zero shares are allowed while a draft is being assembled.
 
-This is the reference's local, single-process storage model. Run only one server per data namespace; multiple instances and serverless deployment require a database-backed store. Email addresses are not verified, and password reset and authentication throttling are not implemented. These accounts and invitations are intended for local development. PostgreSQL/S3 adapters and production account verification remain separate integration work.
+This is the reference's local, single-process storage model. Run only one server per data namespace; multiple instances and serverless deployment require a database-backed store. Active sign-in challenges are bounded, but deployment-level rate limiting is not implemented. PostgreSQL/S3 adapters remain separate integration work.
 
 ## Local services
 
@@ -88,7 +98,7 @@ Stopping services preserves their named Docker volumes. Keep database connection
 
 Fill only the relevant blank values in `.env.local` when integration work begins:
 
-- WalletConnect: project ID from the Reown dashboard.
+- WalletConnect: set `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` to a valid project ID and restart the dev server (or rebuild production) to enable QR connections. Browser wallet sign-in needs no project ID.
 - World ID: registered app ID, RP ID, server signing key, and chosen action/proof flow.
 - Arkiv: selected network RPC URL and chain ID. Signing and entity renewal need implementation.
 - 0G Router: API base URL, API key, and a model verified to accept actual page images.
@@ -110,7 +120,7 @@ npm run contracts:compile
 
 `contracts:compile` currently validates the empty workspace and downloads the configured Solidity compiler as needed. It does not establish any contract behavior.
 
-The backend and browser suites require a successful production build. Both use isolated data namespaces and do not change the normal studio. The backend suite checks account/session behavior, access control, invitation lifecycle, invalid uploads, atomic saves, concurrent edits, and persistence across server restarts. Playwright checks sign-up, uploaded artwork, reload persistence, invitation acceptance/cancellation, collaboration permissions, stale-save recovery, and mobile sign-out/sign-in.
+The backend and browser suites require a successful production build. Both use isolated data namespaces and do not change the normal studio. The backend suite uses ephemeral wallets and real signatures to check message tampering, origin/browser binding, nonce reuse, expiry, old-login rejection, legacy data preservation, access control, invitations, uploads, concurrent edits, and restart persistence. Playwright injects a test EIP-1193/EIP-6963 provider that signs with ephemeral test-runner keys; the real API still verifies every signature. It checks signature rejection/retry, missing wallets, account switching/disconnection, saved artwork, invitation acceptance/cancellation, collaboration permissions, stale-save recovery, and mobile sign-out/sign-in.
 
 Additional test tooling:
 
@@ -133,6 +143,6 @@ Vitest and Playwright load their configurations, and Chromium successfully opene
 UI with HTTP 200. PostgreSQL connectivity and S3 write/read/delete were verified;
 anonymous S3 object access returned HTTP 403. The local service containers are running.
 
-External World ID, Arkiv, 0G and WalletConnect integrations remain unconnected in the UI.
-Those service integrations have not been exercised. `npm run dev` starts the app;
+External World ID, Arkiv, and 0G integrations remain unconnected in the UI.
+Those services and real WalletConnect QR connections have not been exercised. `npm run dev` starts the app;
 `npm run services:down` stops the local services while preserving data.

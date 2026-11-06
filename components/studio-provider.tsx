@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { AppData } from "@/lib/types";
+import { useAccount, useAccountEffect, useDisconnect } from "wagmi";
 
 const empty: AppData = { user: null, projects: [], comics: [], invitations: [] };
 export type StudioResult = { id?: string; token?: string };
@@ -24,14 +25,18 @@ export async function studioRequest<T>(body?: Record<string, unknown>, query = "
 const StudioContext = createContext<{
   data: AppData; loading: boolean; error: string;
   refresh: () => Promise<void>;
+  clearSession: () => Promise<void>;
   execute: (body: Record<string, unknown>) => Promise<StudioResult>;
 } | null>(null);
 
 export function StudioProvider({ children }: { children: React.ReactNode }) {
+  const account = useAccount();
+  const { disconnectAsync } = useDisconnect();
   const [data, setData] = useState<AppData>(empty);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const requestId = useRef(0);
+  const clearing = useRef<Promise<void> | null>(null);
   const refresh = useCallback(async () => {
     const current = ++requestId.current;
     try {
@@ -47,22 +52,43 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     void refresh().catch(() => {});
   }, [refresh]);
+  const clearSession = useCallback(() => {
+    if (clearing.current) return clearing.current;
+    requestId.current++;
+    setData(empty);
+    const work = studioRequest({ action: "logout" }).then(() => { setError(""); })
+      .catch(error => { setError("Could not end your session. Please reconnect and try again."); throw error; })
+      .finally(() => { clearing.current = null; setLoading(false); });
+    clearing.current = work;
+    return work;
+  }, []);
+  useAccountEffect({ onDisconnect: () => { void clearSession().catch(() => {}); } });
+  const walletMismatch = !!(data.user && account.isConnected && data.user.address.toLowerCase() !== account.address?.toLowerCase());
+  useEffect(() => {
+    if (walletMismatch) void clearSession().catch(() => {});
+  }, [walletMismatch, clearSession]);
   const execute = useCallback(async (body: Record<string, unknown>) => {
+    if (body.action === "logout") {
+      await clearSession();
+      await disconnectAsync();
+      return {};
+    }
+    if (clearing.current) await clearing.current;
     // Invalidate an older GET before an account-changing mutation.
     requestId.current++;
     let result: StudioResult;
     try { result = await studioRequest<StudioResult>(body); }
     catch (error) {
       // Clear expired sessions, but keep unsaved edits after validation/conflicts.
-      if (error instanceof StudioError && error.status === 401 && body.action !== "login") await refresh().catch(() => {});
+      if (error instanceof StudioError && error.status === 401) await refresh().catch(() => {});
       else setLoading(false);
       throw error;
     }
-    if (body.action === "logout" || body.action === "login" || body.action === "signup") setData(empty);
+    if (body.action === "siwe") setData(empty);
     await refresh();
     return result;
-  }, [refresh]);
-  return <StudioContext.Provider value={{ data, loading, error, refresh, execute }}>{children}</StudioContext.Provider>;
+  }, [refresh, clearSession, disconnectAsync]);
+  return <StudioContext.Provider value={{ data: walletMismatch ? empty : data, loading, error, refresh, execute, clearSession }}>{children}</StudioContext.Provider>;
 }
 
 export function useStudio() {

@@ -1,11 +1,12 @@
 // Adapted from Asmit-64bit/consentcraft. This API covers the offchain studio only.
 import { NextRequest, NextResponse } from "next/server";
-import { AppError, database, ensure, event, hash, id, passwordMatches, publicUser, sessionUser, text } from "@/lib/store";
+import { AppError, database, ensure, event, id, publicUser, sessionUser, text } from "@/lib/store";
+import { walletAuth, walletAddress, SESSION_COOKIE } from "@/lib/wallet-auth";
 import { validateImage } from "@/lib/images";
 import type { Panel, Project } from "@/lib/types";
 
 const headers = { "Cache-Control": "no-store" };
-const SESSION = "cc_session";
+const SESSION = SESSION_COOKIE;
 const MAX_BODY = 16_000_000;
 function json(body: unknown, status = 200) { return NextResponse.json(body, { status, headers }); }
 function failure(error: unknown) {
@@ -47,10 +48,10 @@ export async function GET(req: NextRequest) {
       const user = sessionUser(db, token);
       if (projectId) {
         ensure(user && db.projects.some(p => p.id === projectId && p.ownerId === user.id), "Project not found.", 404);
-        return json({ invitations: db.invitations.filter(i => i.projectId === projectId && !i.accepted && Date.parse(i.expiresAt) > Date.now()) });
+        return json({ invitations: db.invitations.filter(i => i.address && i.projectId === projectId && !i.accepted && Date.parse(i.expiresAt) > Date.now()) });
       }
       const invitations = user ? db.invitations.flatMap(i => {
-        if (i.accepted || Date.parse(i.expiresAt) <= Date.now() || i.email !== user.email) return [];
+        if (i.accepted || Date.parse(i.expiresAt) <= Date.now() || i.address?.toLowerCase() !== user.address.toLowerCase()) return [];
         const project = db.projects.find(p => p.id === i.projectId && !p.rosterFrozen && p.state === "draft");
         return project ? [{ ...i, projectTitle: project.title, ownerName: project.members.find(m => m.userId === project.ownerId)?.name || "Project owner" }] : [];
       }) : [];
@@ -70,41 +71,17 @@ export async function POST(req: NextRequest) {
     return await database(async db => {
       const action = b.action;
       const token = req.cookies.get(SESSION)?.value;
-      let user = sessionUser(db, token);
-      if (action === "signup" || action === "login") {
-        const email = text(b.email, 254, "Email").toLowerCase();
-        ensure(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email), "Enter a valid email address.");
-        ensure(typeof b.password === "string" && b.password.length >= 8 && b.password.length <= 128, "Use a password with 8–128 characters.");
-        if (action === "signup") {
-          ensure(!db.users.some(u => u.email === email), "An account with this email already exists.", 409);
-          const salt = id();
-          user = { id: id(), name: text(b.name, 60, "Name"), email, color: "purple", salt, password: await hash(b.password, salt) };
-          db.users.push(user);
-        } else {
-          const account = db.users.find(u => u.email === email);
-          ensure(await passwordMatches(b.password, account), "Email or password is incorrect.", 401);
-          user = account!;
-        }
-        const newToken = id();
-        db.sessions = db.sessions.filter(s => s.expires > Date.now() && s.token !== token);
-        db.sessions.push({ token: newToken, userId: user.id, expires: Date.now() + 7 * 86400000 });
-        const response = json({ ok: true, user: publicUser(user) });
-        response.cookies.set(SESSION, newToken, { httpOnly: true, sameSite: "strict", secure: req.nextUrl.protocol === "https:", path: "/", maxAge: 7 * 86400 });
-        return response;
-      }
-      if (action === "logout") {
-        db.sessions = db.sessions.filter(s => s.token !== token);
-        const response = json({ ok: true });
-        response.cookies.delete(SESSION);
-        return response;
-      }
+      const authResponse = await walletAuth(req, b, db);
+      if (authResponse) return authResponse;
+      ensure(action !== "signup" && action !== "login", "Use your wallet to sign in. Email and password authentication is disabled.", 400);
+      const user = sessionUser(db, token);
       ensure(user, "Sign in to use your studio.", 401);
       if (action === "create") {
         const now = new Date().toISOString();
         const project: Project = {
           id: id(), ownerId: user.id, title: text(b.title, 80, "Title"),
           description: text(b.description ?? "", 1000, "Description", false), genre: text(b.genre ?? "Original comic", 60, "Genre"), theme: "",
-          members: [{ userId: user.id, name: user.name, role: "Creator", share: 10000 }],
+          members: [{ userId: user.id, name: user.name, address: user.address, role: "Creator", share: 10000 }],
           panels: Array.from({ length: 4 }, () => ({ image: "", dialogue: "", alt: "" })),
           state: "draft", revision: 1, version: 0, approvals: [], rosterFrozen: false,
           terms: "Personal reading and sharing a link are welcome. Artwork belongs to its creators. Commercial reuse requires permission from all contributors.",
@@ -117,11 +94,11 @@ export async function POST(req: NextRequest) {
       if (action === "accept") {
         const invitation = db.invitations.find(i => i.id === b.token);
         ensure(invitation && !invitation.accepted && Date.parse(invitation.expiresAt) > Date.now(), "This invitation has expired or was already used.", 404);
-        ensure(invitation.email === user.email, "Sign in with the email address this invitation was created for.", 403);
+        ensure(invitation.address?.toLowerCase() === user.address.toLowerCase(), "Sign in with the wallet this invitation was created for.", 403);
         const project = db.projects.find(p => p.id === invitation.projectId);
         ensure(project && !project.rosterFrozen && project.state === "draft", "This team is closed to new collaborators.", 409);
         ensure(!project.members.some(m => m.userId === user.id), "You're already on this team.", 409);
-        project.members.push({ userId: user.id, name: user.name, role: "Collaborator", share: 0 });
+        project.members.push({ userId: user.id, name: user.name, address: user.address, role: "Collaborator", share: 0 });
         project.revision++;
         invitation.accepted = true;
         event(project, `${user.name} joined the team.`);
@@ -140,11 +117,10 @@ export async function POST(req: NextRequest) {
           event(project, `${user.name} canceled a pending invitation.`);
           return json({ ok: true });
         }
-        const email = text(b.email, 254, "Email").toLowerCase();
-        ensure(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email), "Enter a valid email address.");
-        ensure(!project.members.some(m => db.users.find(u => u.id === m.userId)?.email === email), "This person is already on the team.");
-        ensure(!db.invitations.some(i => i.projectId === project.id && i.email === email && !i.accepted && Date.parse(i.expiresAt) > Date.now()), "There is already a pending invitation for this person.", 409);
-        const invitation = { id: id(), projectId: project.id, email, expiresAt: new Date(Date.now() + 7 * 86400000).toISOString(), accepted: false };
+        const address = walletAddress(b.address);
+        ensure(!project.members.some(member => db.users.find(user => user.id === member.userId)?.address?.toLowerCase() === address.toLowerCase()), "This wallet is already on the team.");
+        ensure(!db.invitations.some(invitation => invitation.projectId === project.id && invitation.address?.toLowerCase() === address.toLowerCase() && !invitation.accepted && Date.parse(invitation.expiresAt) > Date.now()), "There is already a pending invitation for this wallet.", 409);
+        const invitation = { id: id(), projectId: project.id, address, expiresAt: new Date(Date.now() + 7 * 86400000).toISOString(), accepted: false };
         db.invitations.push(invitation);
         event(project, `${user.name} created a team invitation.`);
         return json({ token: invitation.id });

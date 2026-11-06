@@ -6,6 +6,7 @@
 .preview-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:22px}
 .wallet-preview{margin:24px 0;padding:22px;background:#eee6f9;border:1.5px solid var(--ink);border-radius:4px}
 .wallet-preview p{font-size:12px;line-height:1.8;margin-top:12px;color:var(--muted)}
+.invitation-card .muted{overflow-wrap:anywhere}
 .panel-picker button:focus-visible{outline-offset:2px}
 .sample-label{font-size:8px}
 .invitation-list{display:grid;gap:20px}

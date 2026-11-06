@@ -2,16 +2,21 @@ import "server-only";
 // Adapted from Asmit-64bit/consentcraft's local studio store.
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
-import { promisify } from "node:util";
+import { randomBytes } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import type { User, Project, Invitation } from "./types";
 
-export type Account = User & { password: string; salt: string };
+// Legacy records stay on disk for recovery, but cannot authenticate or be claimed
+// by a new wallet. Only a verified wallet session can access the studio.
+export type Account = Omit<User, "address"> & { address?: `0x${string}`; email?: string; password?: string; salt?: string };
+type LegacyInvitation = Omit<Invitation, "address"> & { email: string; address?: undefined };
+export type WalletChallenge = { id: string; address: `0x${string}`; message: string; origin: string; expires: number };
 export type Database = {
   users: Account[];
-  sessions: { token: string; userId: string; expires: number }[];
+  sessions: { token: string; userId: string; expires: number; auth?: "wallet" }[];
   projects: Project[];
-  invitations: Invitation[];
+  invitations: (Invitation | LegacyInvitation)[];
+  walletChallenges?: WalletChallenge[];
 };
 
 const namespace = process.env.CONSENTCRAFT_DATA_NAMESPACE || "studio";
@@ -19,6 +24,19 @@ if (!/^[a-zA-Z0-9_-]{1,100}$/.test(namespace)) throw new Error("Invalid studio d
 export const storageRoot = path.join(process.cwd(), ".data", namespace);
 const file = path.join(storageRoot, "studio.json");
 const globalStore = globalThis as typeof globalThis & { consentStudioLock?: Promise<unknown> };
+
+async function replaceFile(temporary: string) {
+  for (let attempt = 0; ; attempt++) {
+    try { await fs.rename(temporary, file); return; }
+    catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      // Windows file watchers/sync clients can briefly lock the destination.
+      // Keep the atomic rename and original file intact; never delete it first.
+      if (process.platform !== "win32" || !["EPERM", "EACCES", "EBUSY"].includes(code || "") || attempt >= 6) throw error;
+      await delay(25 * 2 ** attempt);
+    }
+  }
+}
 
 // Serialize read-modify-write operations within this Node process. Each successful
 // mutation is atomically renamed into place; a failed mutation writes nothing.
@@ -36,7 +54,7 @@ export async function database<T>(fn: (db: Database) => T | Promise<T>, write = 
       const temporary = `${file}.${id()}.tmp`;
       try {
         await fs.writeFile(temporary, JSON.stringify(db), { mode: 0o600 });
-        await fs.rename(temporary, file);
+        await replaceFile(temporary);
       } finally { await fs.unlink(temporary).catch(() => {}); }
     }
     return result;
@@ -46,22 +64,13 @@ export async function database<T>(fn: (db: Database) => T | Promise<T>, write = 
 }
 
 export function id() { return randomBytes(32).toString("hex"); }
-const deriveKey = promisify(scrypt);
-export async function hash(password: string, salt: string) {
-  return (await deriveKey(password, salt, 64) as Buffer).toString("hex");
-}
-export async function passwordMatches(password: string, account?: Account) {
-  // Perform the same expensive operation for an unknown account.
-  const candidate = Buffer.from(await hash(password, account?.salt || "unknown-account"), "hex");
-  const expected = account ? Buffer.from(account.password, "hex") : Buffer.alloc(64);
-  return expected.length === candidate.length && timingSafeEqual(candidate, expected) && !!account;
-}
-export function publicUser(account: Account): User {
-  return { id: account.id, name: account.name, email: account.email, color: account.color };
+export function publicUser(account: User): User {
+  return { id: account.id, name: account.name, address: account.address, color: account.color };
 }
 export function sessionUser(db: Database, token?: string) {
-  const session = token && db.sessions.find(s => s.token === token && s.expires > Date.now());
-  return session ? db.users.find(u => u.id === session.userId) : undefined;
+  const session = token && db.sessions.find(s => s.token === token && s.auth === "wallet" && s.expires > Date.now());
+  const user = session ? db.users.find(u => u.id === session.userId) : undefined;
+  return user?.address ? user as User : undefined;
 }
 export class AppError extends Error {
   constructor(message: string, public status = 400) { super(message); }

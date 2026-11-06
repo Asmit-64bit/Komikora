@@ -7,6 +7,8 @@ import { readFile, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { createServer } from "node:net";
 import sharp from "sharp";
+import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
+import { parseSiweMessage } from "viem/siwe";
 
 const namespace = `test-${randomUUID()}`;
 const dataRoot = path.resolve(".data");
@@ -35,25 +37,29 @@ async function start() {
 async function stop() {
   if (server && server.exitCode === null) { const ended = once(server, "exit"); server.kill(); await ended; }
 }
-function client() {
-  let cookie = "";
+function client(initial = {}) {
+  const cookies = new Map(Object.entries(initial));
+  const cookie = () => [...cookies].map(([key, value]) => `${key}=${value}`).join("; ");
   return {
+    cookie: name => cookies.get(name),
     async get(query = "", expected = 200) {
-      const response = await fetch(`${base}/api/studio${query}`, { headers: { Cookie: cookie } });
+      const response = await fetch(`${base}/api/studio${query}`, { headers: { Cookie: cookie() } });
       const body = await response.json();
       assert.equal(response.status, expected, JSON.stringify(body));
       assert.equal(response.headers.get("cache-control"), "no-store");
       return body;
     },
     async post(body, expected = 200, origin = base) {
-      const response = await fetch(`${base}/api/studio`, { method: "POST", headers: { "Content-Type": "application/json", Origin: origin, Cookie: cookie }, body: JSON.stringify(body) });
+      const response = await fetch(`${base}/api/studio`, { method: "POST", headers: { "Content-Type": "application/json", Origin: origin, Cookie: cookie() }, body: JSON.stringify(body) });
       const result = await response.json();
       if (Array.isArray(expected)) assert.ok(expected.includes(response.status), `${body.action}: ${JSON.stringify(result)}`);
       else assert.equal(response.status, expected, `${body.action}: ${JSON.stringify(result)}`);
-      const session = response.headers.get("set-cookie");
-      if (session) {
-        cookie = session.split(";")[0];
-        if (body.action !== "logout") { assert.match(session, /HttpOnly/i); assert.match(session, /SameSite=strict/i); }
+      for (const header of response.headers.getSetCookie()) {
+        const [name, value] = header.split(";")[0].split("=");
+        if (value) {
+          cookies.set(name, value);
+          assert.match(header, /HttpOnly/i); assert.match(header, /SameSite=strict/i);
+        } else cookies.delete(name);
       }
       assert.equal(JSON.stringify(result).includes('"password"'), false);
       assert.equal(JSON.stringify(result).includes('"salt"'), false);
@@ -67,13 +73,50 @@ try {
   const owner = client(), collaborator = client(), other = client(), anonymous = client();
   assert.deepEqual(await anonymous.get(), { user: null, projects: [], comics: [], invitations: [] });
   await anonymous.post({ action: "create", title: "Blocked" }, 401);
-  await owner.post({ action: "signup", name: "Owner", email: "owner@example.test", password: "short" }, 400);
-  // Password whitespace is significant and survives the full login flow.
-  const password = " correct horse studio ";
-  await owner.post({ action: "signup", name: "Owner", email: "OWNER@example.test", password });
-  await other.post({ action: "signup", name: "Duplicate", email: "owner@example.test", password }, 409);
-  await collaborator.post({ action: "signup", name: "Collaborator", email: "collaborator@example.test", password });
-  await other.post({ action: "signup", name: "Other", email: "other@example.test", password });
+  const ownerWallet = privateKeyToAccount(generatePrivateKey());
+  const collaboratorWallet = privateKeyToAccount(generatePrivateKey());
+  const otherWallet = privateKeyToAccount(generatePrivateKey());
+  const login = async (who, wallet) => {
+    const { message } = await who.post({ action: "challenge", address: wallet.address.toLowerCase(), chainId: 1 });
+    const parsed = parseSiweMessage(message);
+    assert.equal(parsed.domain, new URL(base).host);
+    assert.equal(parsed.uri, base);
+    assert.equal(parsed.address, wallet.address);
+    assert.ok(parsed.expirationTime.getTime() > Date.now());
+    assert.ok(!who.cookie("cc_session"));
+    return who.post({ action: "siwe", message, signature: await wallet.signMessage({ message }) });
+  };
+  for (const action of ["signup", "login"]) await owner.post({ action, name: "Legacy", email: "legacy@example.test", password: "old-password" }, 400);
+  await owner.post({ action: "challenge", address: "not-an-address", chainId: 1 }, 400);
+  await owner.post({ action: "challenge", address: ownerWallet.address, chainId: 0 }, 400);
+  await owner.post({ action: "challenge", address: ownerWallet.address, chainId: 1 }, 403, "https://unrelated.example");
+  const challenger = client();
+  for (const change of [
+    message => message.replace(new URL(base).host, "unrelated.example"),
+    message => message.replace(`URI: ${base}`, "URI: https://unrelated.example"),
+    message => message.replace("Chain ID: 1", "Chain ID: 2"),
+    message => message.replace(ownerWallet.address, otherWallet.address),
+    message => message.replace(/Nonce: .+/, "Nonce: invalidnonce"),
+    message => message.replace(/Expiration Time: .+/, "Expiration Time: 2099-01-01T00:00:00.000Z"),
+  ]) {
+    const { message } = await challenger.post({ action: "challenge", address: ownerWallet.address, chainId: 1 });
+    const altered = change(message);
+    await challenger.post({ action: "siwe", message: altered, signature: await ownerWallet.signMessage({ message: altered }) }, 401);
+    // A failed verification consumes the browser's challenge too.
+    await challenger.post({ action: "siwe", message, signature: await ownerWallet.signMessage({ message }) }, 401);
+  }
+  const { message: wrongSignerMessage } = await challenger.post({ action: "challenge", address: ownerWallet.address, chainId: 1 });
+  await challenger.post({ action: "siwe", message: wrongSignerMessage, signature: await otherWallet.signMessage({ message: wrongSignerMessage }) }, 401);
+  const { message: browserMessage } = await owner.post({ action: "challenge", address: ownerWallet.address, chainId: 1 });
+  const signed = { action: "siwe", message: browserMessage, signature: await ownerWallet.signMessage({ message: browserMessage }) };
+  await anonymous.post(signed, 401);
+  const competing = await Promise.all([owner.post(signed, [200, 401]), owner.post(signed, [200, 401])]);
+  assert.deepEqual(competing.map(result => result._status).sort(), [200, 401]);
+  await owner.post(signed, 401);
+  assert.equal((await owner.get()).user.address, ownerWallet.address);
+  await login(collaborator, collaboratorWallet);
+  await login(other, otherWallet);
+  console.log("PASS wallet-only login, real signatures, origin/message binding, single-use nonces, and cross-browser replay rejection");
   const ownerId = (await owner.get()).user.id;
   const collaboratorId = (await collaborator.get()).user.id;
   const { id } = await owner.post({ action: "create", title: "Shared story", description: "A real saved draft", genre: "Adventure" });
@@ -96,21 +139,21 @@ try {
   assert.equal(oversized.status, 413);
   console.log("PASS accounts, cookies, private workspaces, request validation, and origin checks");
 
-  const invite = await owner.post({ action: "invite", id, email: "COLLABORATOR@example.test" });
-  await owner.post({ action: "invite", id, email: "collaborator@example.test" }, 409);
+  const invite = await owner.post({ action: "invite", id, address: collaboratorWallet.address.toLowerCase() });
+  await owner.post({ action: "invite", id, address: collaboratorWallet.address }, 409);
   assert.equal((await collaborator.get()).invitations[0].projectTitle, "Shared story");
   await other.post({ action: "accept", token: invite.token }, 403);
   await collaborator.post({ action: "accept", token: invite.token });
   await collaborator.post({ action: "accept", token: invite.token }, 404);
   assert.equal((await getProject()).members.length, 2);
   assert.equal((await collaborator.get()).invitations.length, 0);
-  await collaborator.post({ action: "invite", id, email: "other@example.test" }, 403);
-  const canceled = await owner.post({ action: "invite", id, email: "other@example.test" });
+  await collaborator.post({ action: "invite", id, address: otherWallet.address }, 403);
+  const canceled = await owner.post({ action: "invite", id, address: otherWallet.address });
   await collaborator.post({ action: "cancelInvite", id, invitation: canceled.token }, 403);
   await owner.post({ action: "cancelInvite", id, invitation: canceled.token });
   await other.post({ action: "accept", token: canceled.token }, 404);
   assert.equal((await owner.get(`?invitations=${id}`)).invitations.length, 0);
-  console.log("PASS email-bound, single-use invitations, owner permissions, inboxes, and cancellation");
+  console.log("PASS wallet-bound, single-use invitations, owner permissions, inboxes, and cancellation");
 
   const png = await sharp({ create: { width: 16, height: 12, channels: 3, background: "#c6b3ed" } }).png().toBuffer();
   const image = `data:image/png;base64,${png.toString("base64")}`;
@@ -144,22 +187,40 @@ try {
   console.log("PASS image decoding, atomic validation, role boundaries, concurrent edit conflicts, and disabled chain actions");
 
   const disk = JSON.parse(await readFile(dataFile, "utf8"));
-  assert.ok(disk.users.every(user => user.password !== password && user.password.length === 128));
+  assert.ok(disk.users.every(user => user.address && !("password" in user) && !("email" in user)));
   await stop(); await start();
   assert.equal((await getProject()).panels[0].dialogue, "Collaborator edit");
   await owner.post({ action: "logout" });
   assert.equal((await owner.get()).user, null);
-  await owner.post({ action: "login", email: "owner@example.test", password: password.trim() }, 401);
-  await owner.post({ action: "login", email: "owner@example.test", password });
+  await login(owner, ownerWallet);
+  assert.equal((await owner.get()).user.id, ownerId);
   assert.equal((await getProject()).members.length, 2);
+  const { message: expiringMessage } = await challenger.post({ action: "challenge", address: ownerWallet.address, chainId: 1 });
   await stop();
   const expiring = JSON.parse(await readFile(dataFile, "utf8"));
   expiring.sessions.forEach(session => { session.expires = 0; });
+  expiring.walletChallenges.forEach(challenge => { challenge.expires = 0; });
+  const legacyAccount = { id: "legacy-account", name: "Legacy", email: "legacy@example.test", password: "old-hash", salt: "old-salt", color: "purple" };
+  expiring.users.push(legacyAccount);
+  expiring.sessions.push({ token: "legacy-session", userId: legacyAccount.id, expires: Date.now() + 60000 });
+  expiring.sessions.push({ token: "unverified-wallet-session", userId: ownerId, expires: Date.now() + 60000 });
+  const legacyProject = { ...expiring.projects[0], id: "legacy-project", ownerId: legacyAccount.id, members: [{ userId: legacyAccount.id, name: "Legacy", role: "Creator", share: 10000 }] };
+  expiring.projects.push(legacyProject);
   await writeFile(dataFile, JSON.stringify(expiring));
   await start();
   assert.equal((await owner.get()).user, null);
   await owner.post({ action: "create", title: "Expired" }, 401);
-  console.log("PASS password hashing, restart persistence, sign-out/sign-in, and expired sessions");
+  await challenger.post({ action: "siwe", message: expiringMessage, signature: await ownerWallet.signMessage({ message: expiringMessage }) }, 401);
+  assert.equal((await client({ cc_session: "legacy-session" }).get()).user, null);
+  assert.equal((await client({ cc_session: "unverified-wallet-session" }).get()).user, null);
+  await client({ cc_session: "legacy-session" }).post({ action: "create", title: "Legacy access" }, 401);
+  const newWalletSession = client();
+  await login(newWalletSession, ownerWallet);
+  assert.ok((await newWalletSession.get()).projects.every(project => project.id !== legacyProject.id));
+  const preserved = JSON.parse(await readFile(dataFile, "utf8"));
+  assert.deepEqual(preserved.users.find(user => user.id === legacyAccount.id), legacyAccount);
+  assert.deepEqual(preserved.projects.find(project => project.id === legacyProject.id), legacyProject);
+  console.log("PASS restart persistence, returning wallet identity, logout, expiry, legacy session rejection, and preservation of old drafts");
   completed = true;
 } catch (error) { console.error(output); throw error; }
 finally {

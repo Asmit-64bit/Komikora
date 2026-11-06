@@ -1,27 +1,32 @@
 import { test, expect, type Page } from "@playwright/test";
 import sharp from "sharp";
+import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
+import { installWallet, type WalletTestWindow } from "./wallet";
 
 test("accounts, saved artwork, invitations, collaboration, and conflict recovery", async ({ page, browser }, testInfo) => {
   test.setTimeout(90_000);
-  const suffix = `${Date.now()}`;
-  const ownerEmail = `owner-${suffix}@example.test`;
-  const collaboratorEmail = `collaborator-${suffix}@example.test`;
-  const password = "local-studio-test-password";
+  const ownerWallet = privateKeyToAccount(generatePrivateKey());
+  const collaboratorWallet = privateKeyToAccount(generatePrivateKey());
+  const otherWallet = privateKeyToAccount(generatePrivateKey());
+  const shortAddress = (address: string) => `${address.slice(0, 6)}…${address.slice(-4)}`;
+  await installWallet(page, [ownerWallet, otherWallet]);
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
   const main = (target: Page) => target.locator("main:visible");
-  async function signup(target: Page, name: string, email: string) {
+  async function signin(target: Page) {
     const dialog = target.getByRole("dialog");
-    await dialog.getByLabel("Your name").fill(name);
-    await dialog.getByLabel("Email", { exact: true }).fill(email);
-    await dialog.getByLabel("Password", { exact: true }).fill(password);
-    await dialog.getByRole("button", { name: "Create account", exact: true }).click();
+    await expect(dialog.getByLabel("Email", { exact: true })).toHaveCount(0);
+    await expect(dialog.getByLabel("Password", { exact: true })).toHaveCount(0);
+    const connect = dialog.getByRole("button", { name: /^Test Wallet(?: Recent)?$/ });
+    await expect(connect.or(dialog.getByRole("button", { name: "Sign message", exact: true }))).toBeVisible();
+    if (await connect.isVisible()) await connect.click();
+    await dialog.getByRole("button", { name: "Sign message", exact: true }).click();
     await expect(dialog).not.toBeVisible();
   }
 
   await page.goto("/");
-  await page.getByRole("button", { name: "Join the studio" }).click();
-  await signup(page, "Studio Owner", ownerEmail);
+  await page.getByRole("button", { name: "Connect wallet", exact: true }).click();
+  await signin(page);
   await main(page).getByRole("button", { name: "New project", exact: true }).click();
   const create = page.getByRole("dialog");
   await create.getByLabel("Give your comic a name").fill("A saved collaboration");
@@ -41,7 +46,7 @@ test("accounts, saved artwork, invitations, collaboration, and conflict recovery
   await expect(main(page).locator(".upload-area img")).toHaveAttribute("src", /^data:image\/jpeg;base64,/);
 
   await main(page).getByRole("tab", { name: "Team & shares" }).click();
-  await main(page).getByLabel("Collaborator email", { exact: true }).fill(collaboratorEmail);
+  await main(page).getByLabel("Collaborator wallet address", { exact: true }).fill(collaboratorWallet.address);
   await main(page).getByRole("button", { name: "Create invite", exact: true }).click();
   const invitationInput = main(page).getByLabel("Invitation link");
   await expect(invitationInput).toHaveValue(/\/invites\//);
@@ -50,11 +55,12 @@ test("accounts, saved artwork, invitations, collaboration, and conflict recovery
 
   const collaboratorContext = await browser.newContext();
   const collaborator = await collaboratorContext.newPage();
+  await installWallet(collaborator, [collaboratorWallet]);
   collaborator.on("pageerror", error => errors.push(error.message));
   try {
     await collaborator.goto(inviteUrl);
-    await main(collaborator).getByRole("button", { name: "Sign in or create account" }).click();
-    await signup(collaborator, "Studio Collaborator", collaboratorEmail);
+    await main(collaborator).getByRole("button", { name: "Sign in with wallet" }).click();
+    await signin(collaborator);
     await main(collaborator).getByRole("button", { name: "Accept invitation", exact: true }).click();
     await collaborator.waitForURL(projectUrl);
     await expect(main(collaborator).getByLabel("Dialogue or caption")).toHaveValue("Saved beyond a reload.");
@@ -76,17 +82,17 @@ test("accounts, saved artwork, invitations, collaboration, and conflict recovery
     await expect(main(page).getByLabel("Dialogue or caption")).toHaveValue("A collaborator was here.");
 
     await main(page).getByRole("tab", { name: "Team & shares" }).click();
-    await main(page).getByRole("spinbutton", { name: "Share for Studio Owner %", exact: true }).fill("60");
-    await main(page).getByRole("spinbutton", { name: "Share for Studio Collaborator %", exact: true }).fill("40");
+    await main(page).getByRole("spinbutton", { name: `Share for ${shortAddress(ownerWallet.address)} %`, exact: true }).fill("60");
+    await main(page).getByRole("spinbutton", { name: `Share for ${shortAddress(collaboratorWallet.address)} %`, exact: true }).fill("40");
     await main(page).getByRole("button", { name: "Save changes", exact: true }).click();
     await expect(main(page).getByRole("button", { name: "All changes saved" })).toBeDisabled();
-    await main(page).getByLabel("Collaborator email", { exact: true }).fill(`cancel-${suffix}@example.test`);
+    await main(page).getByLabel("Collaborator wallet address", { exact: true }).fill(otherWallet.address);
     await main(page).getByRole("button", { name: "Create invite", exact: true }).click();
     await expect(main(page).locator(".pending-invite")).toHaveCount(1);
     await main(page).locator(".pending-invite").getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(main(page).locator(".pending-invite")).toHaveCount(0);
     await expect(main(page).getByLabel("Invitation link")).toHaveCount(0);
-    await main(page).getByLabel("Collaborator email", { exact: true }).click();
+    await main(page).getByLabel("Collaborator wallet address", { exact: true }).click();
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.screenshot({ path: testInfo.outputPath("studio-team-desktop.png"), fullPage: true });
 
@@ -97,15 +103,20 @@ test("accounts, saved artwork, invitations, collaboration, and conflict recovery
     await page.getByRole("button", { name: "Sign out", exact: true }).click();
     await page.waitForURL(/\/$/);
     await expect(main(page).getByRole("heading", { name: "Good stories start together." })).toBeVisible();
-    await page.getByRole("button", { name: "Join the studio" }).click();
-    const login = page.getByRole("dialog");
-    await login.getByRole("button", { name: "Already have an account? Sign in" }).click();
-    await login.getByLabel("Email", { exact: true }).fill(ownerEmail);
-    await login.getByLabel("Password", { exact: true }).fill(password);
-    await login.getByRole("button", { name: "Sign in", exact: true }).click();
-    await expect(login).not.toBeVisible();
+    await page.getByRole("button", { name: "Connect wallet", exact: true }).click();
+    await signin(page);
     await page.goto(projectUrl);
     await expect(main(page).getByLabel("Dialogue or caption")).toHaveValue("A collaborator was here.");
+    // Switching accounts clears the signed session instead of reusing it.
+    await page.evaluate(address => (window as unknown as WalletTestWindow).walletTest.switchAccount(address), otherWallet.address);
+    await expect(main(page).getByRole("heading", { name: "Your studio is waiting" })).toBeVisible();
+    await expect.poll(async () => (await (await page.request.get("/api/studio")).json()).user).toBeNull();
+    await page.getByRole("button", { name: "Connect wallet", exact: true }).click();
+    await signin(page);
+    await expect(main(page).getByRole("heading", { name: "This draft is not here" })).toBeVisible();
+    await page.evaluate(() => (window as unknown as WalletTestWindow).walletTest.disconnect());
+    await expect(page.getByRole("button", { name: "Connect wallet", exact: true })).toBeVisible();
+    await expect.poll(async () => (await (await page.request.get("/api/studio")).json()).user).toBeNull();
     expect(errors).toEqual([]);
   } finally { await collaboratorContext.close(); }
 });

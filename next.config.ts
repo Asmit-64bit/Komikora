@@ -7,6 +7,9 @@ const nextConfig: NextConfig = {
   },
   cacheComponents: true,
   partialPrefetching: true,
+  // A transitive wallet connector imports CDP's Node SDK. Keep its optional
+  // payment modules lazy instead of resolving unused peers during SSR bundling.
+  serverExternalPackages: ["@coinbase/cdp-sdk"],
   // The copied design uses plain CSS, which Turbopack handles natively.
   devIndicators: false,
 };

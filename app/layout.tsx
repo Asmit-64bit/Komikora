@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
 import { StudioProvider } from "@/components/studio-provider";
+import { WalletProvider } from "@/components/wallet-provider";
+import { RainbowStudioProvider } from "@/components/rainbow-studio-provider";
+import "@rainbow-me/rainbowkit/styles.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -10,7 +13,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en">
-      <body><StudioProvider>{children}</StudioProvider></body>
+      <body><WalletProvider><StudioProvider><RainbowStudioProvider>{children}</RainbowStudioProvider></StudioProvider></WalletProvider></body>
     </html>
   );
 }
