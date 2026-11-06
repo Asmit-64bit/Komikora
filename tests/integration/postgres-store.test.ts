@@ -2,14 +2,17 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
+import { postgresPoolOptions } from "@/lib/server/postgres-store";
 describe.skipIf(!process.env.TEST_STUDIO_DATABASE_URL)("persistent studio transactions", () => {
   const namespace = `postgres-test-${randomUUID()}`;
   let sql: Pool;
-  beforeAll(() => { vi.stubEnv("STUDIO_DATABASE_URL", process.env.TEST_STUDIO_DATABASE_URL!); sql = new Pool({ connectionString: process.env.TEST_STUDIO_DATABASE_URL, connectionTimeoutMillis: 5000 }); });
+  beforeAll(() => { vi.stubEnv("STUDIO_DATABASE_URL", process.env.TEST_STUDIO_DATABASE_URL!); sql = new Pool({ ...postgresPoolOptions(process.env.TEST_STUDIO_DATABASE_URL!), connectionTimeoutMillis: 5000 }); });
   afterAll(async () => { await sql.query("DELETE FROM consentcraft_studio_state WHERE namespace = $1", [namespace]); await sql.end(); vi.unstubAllEnvs(); });
   it("persists across instances, serializes concurrent writes and rolls back failures", async () => {
     const first = await import("@/lib/server/postgres-store");
     await first.postgresDatabase(namespace, db => { db.users.push({ id: "initial", name: "Fixture", color: "purple" }); }, true);
+    const privacy = await sql.query("SELECT relrowsecurity FROM pg_class WHERE oid = 'consentcraft_studio_state'::regclass");
+    expect(privacy.rows[0].relrowsecurity).toBe(true);
     vi.resetModules(); const second = await import("@/lib/server/postgres-store");
     expect(await second.postgresDatabase(namespace, db => db.users.length, false)).toBe(1);
     await Promise.all(Array.from({ length: 12 }, (_, i) => (i % 2 ? first : second).postgresDatabase(namespace, async db => {

@@ -54,8 +54,9 @@ export async function database<T>(fn: (db: Database) => T | Promise<T>, write = 
   ensure(driver === "postgres" || driver === "file", "The studio storage configuration is invalid.", 503);
   if (process.env.VERCEL === "1") ensure(driver === "postgres", "This deployment requires persistent PostgreSQL storage for sign-in.", 503);
   if (driver === "postgres") {
-    const { postgresDatabase, postgresConnection } = await import("./server/postgres-store");
-    ensure(postgresConnection(), "Sign-in is unavailable: the studio operator must connect a persistent PostgreSQL database.", 503);
+    const { postgresDatabase, postgresConfigurationError } = await import("./server/postgres-store");
+    const configurationError = postgresConfigurationError();
+    ensure(!configurationError, configurationError || "Invalid database configuration.", 503);
     try { return await postgresDatabase(namespace, fn, write); }
     catch (error) {
       if (error instanceof AppError) throw error;

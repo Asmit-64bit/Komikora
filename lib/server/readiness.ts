@@ -5,6 +5,7 @@ import { editionsAbi } from "@/lib/editions-abi";
 import { editionPermitTypes } from "@/lib/edition-permit";
 import { envValue, hasKey } from "./env";
 import { DEFAULT_PRIVATE_MODEL } from "./private-computer";
+import { postgresConfigurationError } from "./postgres-store";
 export type ServiceReadiness = { name: string; status: "ready" | "missing" | "unverified" | "error"; detail: string; fields: string[]; link?: string };
 export async function integrationReadiness(probe = false): Promise<ServiceReadiness[]> {
   const rows: ServiceReadiness[] = [];
@@ -12,8 +13,10 @@ export async function integrationReadiness(probe = false): Promise<ServiceReadin
   const sqlConfigured = !!(envValue("STUDIO_DATABASE_URL") || envValue("DATABASE_URL") || envValue("POSTGRES_URL"));
   let storageStatus: ServiceReadiness["status"] = storageDriver === "postgres" ? sqlConfigured ? "unverified" : "missing" : process.env.VERCEL === "1" ? "error" : "ready";
   let storageDetail = storageDriver === "postgres" ? "Persistent PostgreSQL stores wallet sessions, drafts and encrypted content keys." : "Local file storage is active; it requires a persistent disk and a single application process.";
+  const storageError = storageDriver === "postgres" ? postgresConfigurationError() : undefined;
+  if (storageError) { storageStatus = sqlConfigured ? "error" : "missing"; storageDetail = storageError; }
   if (process.env.VERCEL === "1" && storageDriver !== "postgres") storageDetail = "Vercel requires PostgreSQL storage. Local files cannot persist wallet sessions.";
-  if (probe && storageDriver === "postgres" && sqlConfigured) {
+  if (probe && storageDriver === "postgres" && sqlConfigured && !storageError) {
     try { const { database } = await import("@/lib/store"); await database(db => db.users.length); storageStatus = "ready"; }
     catch { storageStatus = "error"; storageDetail = "The studio database cannot be reached. Check the hosted connection and database permissions."; }
   }
