@@ -8,6 +8,16 @@ import { DEFAULT_PRIVATE_MODEL } from "./private-computer";
 export type ServiceReadiness = { name: string; status: "ready" | "missing" | "unverified" | "error"; detail: string; fields: string[]; link?: string };
 export async function integrationReadiness(probe = false): Promise<ServiceReadiness[]> {
   const rows: ServiceReadiness[] = [];
+  const storageDriver = envValue("STUDIO_STORAGE") || (process.env.VERCEL === "1" ? "postgres" : "file");
+  const sqlConfigured = !!(envValue("STUDIO_DATABASE_URL") || envValue("DATABASE_URL") || envValue("POSTGRES_URL"));
+  let storageStatus: ServiceReadiness["status"] = storageDriver === "postgres" ? sqlConfigured ? "unverified" : "missing" : process.env.VERCEL === "1" ? "error" : "ready";
+  let storageDetail = storageDriver === "postgres" ? "Persistent PostgreSQL stores wallet sessions, drafts and encrypted content keys." : "Local file storage is active; it requires a persistent disk and a single application process.";
+  if (process.env.VERCEL === "1" && storageDriver !== "postgres") storageDetail = "Vercel requires PostgreSQL storage. Local files cannot persist wallet sessions.";
+  if (probe && storageDriver === "postgres" && sqlConfigured) {
+    try { const { database } = await import("@/lib/store"); await database(db => db.users.length); storageStatus = "ready"; }
+    catch { storageStatus = "error"; storageDetail = "The studio database cannot be reached. Check the hosted connection and database permissions."; }
+  }
+  rows.push({ name: "Studio sessions and data", status: storageStatus, detail: storageDetail, fields: storageDriver === "postgres" && !sqlConfigured ? ["STUDIO_DATABASE_URL"] : [] });
   const missing = (fields: string[]) => fields.filter(f => !envValue(f));
   const rpc = envValue("CHAIN_RPC_URL") || envValue("NEXT_PUBLIC_RPC_URL");
   const address = envValue("NEXT_PUBLIC_EDITIONS_ADDRESS"); const chainId = Number(envValue("NEXT_PUBLIC_CHAIN_ID"));
@@ -26,8 +36,6 @@ export async function integrationReadiness(probe = false): Promise<ServiceReadin
     else { chainDetail = "Network, NFT contract API and reviewer signing key match."; chainStatus = "ready"; }
   } catch { chainDetail = "Could not validate this network and NFT contract. Check the RPC, chain ID and deployment address."; chainStatus = "error"; }
   rows.push({ name: "NFT blockchain", status: chainStatus, detail: chainFields.length ? "A deployment and RPC connection are required." : chainDetail, fields: chainFields, link: chainId === 11155111 && address && isAddress(address) ? `https://sepolia.etherscan.io/address/${address}` : undefined });
-  const identityFields = missing(["WORLD_AGENTPASS_CLIENT_ID", "WORLD_AGENTPASS_CLIENT_SECRET"]);
-  rows.push({ name: "World ID Agent Pass", status: identityFields.length ? "missing" : "unverified", detail: "Register the exact HTTPS callback URL, then complete a real creator and publication approval. Client authentication must match the portal registration.", fields: identityFields, link: "https://auth.world.org/portal" });
   const aiFields = missing(["ZG_COMPUTE_API_KEY"]); let aiStatus: ServiceReadiness["status"] = aiFields.length ? "missing" : "unverified";
   let aiDetail = "Private Computer powers image review and collector suggestions. Model access is checked without generating paid inference.";
   if (probe && !aiFields.length) try {

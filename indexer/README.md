@@ -60,7 +60,6 @@ npm run indexer -- trades --writer 0xWRITER [--publication 1]
   Fetch failures are retried with backoff; mismatches are permanent.
 - **Never written:**
   - decryption keys and page content
-  - World ID proofs
   - appeal evidence and review rationale
   - the encrypted bundle's Arweave ID
 - **Expiry:** entities live 180 days (Arkiv's maximum is about 182). `renew` extends active listings and all trades that are within 30 days of expiry, and recreates any that already expired. Rejected listings are left to expire.

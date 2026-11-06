@@ -3,6 +3,7 @@ import "server-only";
 // that feature with a clear message. Nothing ever falls back to a mock result.
 import { getAddress, isAddress, isHex, type Address, type Hex } from "viem";
 import { AppError } from "@/lib/store";
+import { configuredAppOrigin } from "./app-origin";
 
 export class NotConfiguredError extends AppError {
   constructor(feature: string, missing: string[]) {
@@ -14,9 +15,9 @@ const value = (name: string) => process.env[name]?.trim() || undefined;
 
 /** The one origin this app is served from. Sign-in messages are pinned to it. */
 export function appOrigin(): string {
-  const raw = value("NEXT_PUBLIC_APP_URL");
-  if (!raw) throw new NotConfiguredError("Sign-in", ["NEXT_PUBLIC_APP_URL"]);
-  return new URL(raw).origin;
+  const origin = configuredAppOrigin();
+  if (!origin) throw new NotConfiguredError("Sign-in", ["APP_ORIGIN"]);
+  return origin;
 }
 
 export function privateKey(name: string, feature: string): Hex {

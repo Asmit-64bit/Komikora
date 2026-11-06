@@ -2,7 +2,7 @@
  * Arkiv entity schemas and value builders for listings and trades.
  *
  * Arkiv data is public. These entities hold only public marketplace data. They never hold
- * decryption keys, page content, World ID proofs, appeal evidence, review rationale, or the
+ * decryption keys, page content, appeal evidence, review rationale, or the
  * encrypted bundle's Arweave ID.
  */
 import { addr, defineSchema, key, str, u256, u64 } from "@arkiv-network/sdk/schema";

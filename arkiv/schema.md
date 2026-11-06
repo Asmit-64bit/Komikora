@@ -55,7 +55,7 @@ Identity: `listingId = keccak256(abi.encode(chainId, contract, publicationId))`.
 
 `title`, `genre`, `language` and `previewRef` are written **only** when the manifest bytes fetched from Arweave hash to the on-chain `previewManifestHash`. Otherwise `metadataStatus` is `unavailable` and those attributes are absent.
 
-**Never written:** decryption keys, pages, World ID proofs, appeal evidence, review rationale, and `arweaveBundleTxId` (the encrypted bundle).
+**Never written:** decryption keys, pages, appeal evidence, review rationale, and `arweaveBundleTxId` (the encrypted bundle).
 
 ## `consentcraft.trade.v1`: one per `Purchased` event
 

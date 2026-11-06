@@ -1,6 +1,21 @@
 import { test, expect } from "@playwright/test";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
+import { hexToString, type Hex } from "viem";
+import { parseSiweMessage } from "viem/siwe";
 import { installWallet, type WalletTestWindow } from "./wallet";
+
+test("a deployment storage failure shows the actual sign-in error", async ({ page }) => {
+  await installWallet(page, [privateKeyToAccount(generatePrivateKey())]);
+  await page.route("**/api/studio", async route => {
+    const body = route.request().method() === "POST" ? route.request().postDataJSON() : null;
+    if (body?.action === "logout") return route.fulfill({ status: 503, json: { error: "Sign-in is unavailable: connect a persistent PostgreSQL database." } });
+    return route.continue();
+  });
+  await page.goto("/"); await page.getByRole("button", { name: "Connect wallet", exact: true }).click();
+  const dialog = page.getByRole("dialog"); await dialog.getByRole("button", { name: "Test Wallet", exact: true }).click();
+  await dialog.getByRole("button", { name: "Sign message", exact: true }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "connect a persistent PostgreSQL database" })).toBeVisible();
+});
 
 test("rejecting a signature does not log in, and retry succeeds", async ({ page }, testInfo) => {
   await installWallet(page, [privateKeyToAccount(generatePrivateKey())]);
@@ -21,6 +36,19 @@ test("rejecting a signature does not log in, and retry succeeds", async ({ page 
   await dialog.getByRole("button", { name: "Sign message", exact: true }).click();
   await expect(dialog).not.toBeVisible();
   await expect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
+  const requests = await page.evaluate(() => (window as unknown as WalletTestWindow).walletTest.getRequests());
+  // Audit attempted requests too: a rejected transaction must not hide behind
+  // an otherwise successful login. Signing in only requests a SIWE signature.
+  const signingRequests = requests.filter(({ method }) => /sign|sendTransaction|sendCalls/i.test(method));
+  expect(signingRequests.map(({ method }) => method)).toEqual(["personal_sign", "personal_sign"]);
+  for (const { params } of signingRequests) {
+    const message = parseSiweMessage(hexToString(params[0] as Hex));
+    expect(message.domain).toBe(new URL(page.url()).host);
+    expect(message.uri).toBe(new URL(page.url()).origin);
+    expect(message.address?.toLowerCase()).toBe(String(params[1]).toLowerCase());
+    expect(message.chainId).toBe(1);
+    expect(message.statement).toBe("Sign in to ConsentCraft. This message does not authorize transactions or cost gas.");
+  }
   await page.screenshot({ path: testInfo.outputPath("wallet-studio.png") });
   await page.getByTestId("rk-account-button").click();
   await expect(dialog.getByRole("button", { name: /^Disconnect(?: Disconnect)?$/ })).toBeVisible();

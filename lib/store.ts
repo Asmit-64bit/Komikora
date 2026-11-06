@@ -5,11 +5,10 @@ import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import type { User, Project, Invitation } from "./types";
-import type { PublicationApproval } from "./approval-types";
 
 // Legacy records stay on disk for recovery, but cannot authenticate or be claimed
 // by a new wallet. Only a verified wallet session can access the studio.
-export type Account = Omit<User, "address"> & { address?: `0x${string}`; email?: string; password?: string; salt?: string; worldIdentity?: string };
+export type Account = Omit<User, "address"> & { address?: `0x${string}`; email?: string; password?: string; salt?: string };
 type LegacyInvitation = Omit<Invitation, "address"> & { email: string; address?: undefined };
 export type WalletChallenge = { id: string; address: `0x${string}`; message: string; origin: string; expires: number };
 export type Database = {
@@ -18,9 +17,6 @@ export type Database = {
   projects: Project[];
   invitations: (Invitation | LegacyInvitation)[];
   walletChallenges?: WalletChallenge[];
-  worldIdRequests?: { nonce: string; userId: string; expires: number }[];
-  /** sha256(rp id + nullifier) -> user id. Enforces one human per account. */
-  worldIdNullifiers?: Record<string, string>;
   /** Server-only publishing secrets, keyed by project id. Never returned to clients. */
   publicationSecrets?: Record<string, { wrappedKey: string; reviewReport?: unknown }>;
   /** Private appeal evidence and reviewer reasons. Only salted hashes go on chain. */
@@ -30,7 +26,6 @@ export type Database = {
   abuseReports?: { id: string; comicId: string; userId: string; text: string; at: string; status: "open" | "resolved"; response?: string }[];
   curatorRequests?: { userId: string; at: number }[];
   curatorSuggestions?: { key: string; at: number; result: { picks: { tokenId: string; reason: string; title: string }[]; requestId: string; model: string; at: string; promptVersion: string } }[];
-  publicationApprovals?: PublicationApproval[];
 };
 
 const namespace = process.env.CONSENTCRAFT_DATA_NAMESPACE || "studio";
@@ -55,6 +50,18 @@ async function replaceFile(temporary: string) {
 // Serialize read-modify-write operations within this Node process. Each successful
 // mutation is atomically renamed into place; a failed mutation writes nothing.
 export async function database<T>(fn: (db: Database) => T | Promise<T>, write = false): Promise<T> {
+  const driver = process.env.STUDIO_STORAGE?.trim() || (process.env.VERCEL === "1" ? "postgres" : "file");
+  ensure(driver === "postgres" || driver === "file", "The studio storage configuration is invalid.", 503);
+  if (process.env.VERCEL === "1") ensure(driver === "postgres", "This deployment requires persistent PostgreSQL storage for sign-in.", 503);
+  if (driver === "postgres") {
+    const { postgresDatabase, postgresConnection } = await import("./server/postgres-store");
+    ensure(postgresConnection(), "Sign-in is unavailable: the studio operator must connect a persistent PostgreSQL database.", 503);
+    try { return await postgresDatabase(namespace, fn, write); }
+    catch (error) {
+      if (error instanceof AppError) throw error;
+      throw new AppError("The studio database is unavailable. Please retry shortly or contact the studio operator.", 503);
+    }
+  }
   const work = (globalStore.consentStudioLock || Promise.resolve()).catch(() => {}).then(async () => {
     await fs.mkdir(storageRoot, { recursive: true });
     let db: Database;
@@ -79,7 +86,7 @@ export async function database<T>(fn: (db: Database) => T | Promise<T>, write = 
 
 export function id() { return randomBytes(32).toString("hex"); }
 export function publicUser(account: User): User {
-  return { id: account.id, name: account.name, address: account.address, color: account.color, ...(account.worldIdVerifiedAt ? { worldIdVerifiedAt: account.worldIdVerifiedAt, worldIdEnvironment: account.worldIdEnvironment } : {}) };
+  return { id: account.id, name: account.name, address: account.address, color: account.color };
 }
 export function sessionUser(db: Database, token?: string) {
   const session = token && db.sessions.find(s => s.token === token && s.auth === "wallet" && s.expires > Date.now());

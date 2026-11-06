@@ -1,21 +1,25 @@
 import { test, expect } from "@playwright/test";
-test("service and approval links resolve and private actions require a session", async ({ page, request }, info) => {
+test("service pages load without identity setup and private actions require a session", async ({ page, request }, info) => {
   const errors: string[] = []; page.on("pageerror", e => errors.push(e.message));
-  for (const [path, heading] of [["/network", "Network & services."], ["/help", "Make together. Agree together."], ["/approval/missing-request", "Approve this publication"]]) {
+  for (const [path, heading] of [["/network", "Network & services."], ["/help", "Make together. Agree together."], ["/earnings", "Earnings."]]) {
     const response = await page.goto(path); expect(response?.status()).toBe(200);
     await expect(page.locator("main:visible").getByRole("heading", { name: heading, exact: true })).toBeVisible();
     if (path === "/network") {
-      await expect(page.locator("main:visible").getByRole("heading", { name: /^World ID Agent Pass/ })).toBeVisible();
+      await expect(page.locator("main:visible")).not.toContainText(/World ID|Agent Pass|identity verification/i);
       await page.setViewportSize({ width: 390, height: 844 });
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       await page.screenshot({ path: info.outputPath("network-mobile.png"), fullPage: true });
       await page.setViewportSize({ width: 1280, height: 720 });
     }
   }
-  await expect(page.locator("main:visible").getByRole("alert")).toContainText(/Sign in/);
-  await page.goto("/api/agent-pass/callback?error=access_denied");
-  await expect(page).toHaveURL(/\/network\?approval=failed$/);
-  await expect(page.locator("main:visible").getByRole("alert")).toContainText("World ID approval could not be completed");
+  for (const path of ["/api/personhood", "/api/agent-pass", "/api/agent-pass/callback"]) {
+    expect((await request.get(path)).status()).toBe(404);
+    expect((await request.post(path, { data: {} })).status()).toBe(404);
+  }
+  await page.goto("/approval/missing-request");
+  await expect(page.locator("main:visible").getByRole("heading", { name: "This page wandered off" })).toBeVisible();
+  const authorization = await request.post("/api/market/authorization", { data: { action: "purchase" }, headers: { Origin: "http://127.0.0.1:3100" } });
+  expect(authorization.status()).toBe(401);
   const denied = await request.post("/api/recommendations", { data: { interests: "fantasy" }, headers: { Origin: "http://127.0.0.1:3100" } }); expect(denied.status()).toBe(401);
   expect(errors).toEqual([]);
 });

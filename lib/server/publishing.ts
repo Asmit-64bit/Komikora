@@ -57,7 +57,6 @@ export async function preparePublication(token: string | undefined, body: Record
   const snapshot = await database(db => {
     const user = sessionUser(db, token);
     ensure(user, "Sign in to publish.", 401);
-    ensure(user.worldIdVerifiedAt, "Verify your account with World ID before publishing.", 403);
     const project = ownedProject(db, user, body.id);
     ensure(!project.publication || project.publication.status === "quoted", "This comic is already on chain.", 409);
     if (!project.publication) {

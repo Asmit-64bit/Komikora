@@ -16,7 +16,16 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     connectors: connectorsForWallets([{ groupName: "Wallets", wallets: projectId
       ? [rainbowWallet, metaMaskWallet, rabbyWallet, walletConnectWallet, injectedWallet]
       : [injectedWallet, rabbyWallet],
-    }], { appName: "ConsentCraft", projectId }),
+    }], {
+      appName: "ConsentCraft",
+      appDescription: "Create, collect and read comic NFT editions with ConsentCraft.",
+      // Use the page's actual origin, including preview deployments. A copied
+      // localhost/canonical env URL must not identify a different site to wallets.
+      // RainbowKit also defaults appUrl to this origin when running in a browser.
+      appUrl: typeof window !== "undefined" ? window.location.origin : undefined,
+      appIcon: typeof window !== "undefined" ? `${window.location.origin}/icon.svg` : undefined,
+      projectId,
+    }),
     // EIP-6963 discovers installed wallets individually. The injected connector
     // also supports wallets that expose only window.ethereum.
     multiInjectedProviderDiscovery: true,

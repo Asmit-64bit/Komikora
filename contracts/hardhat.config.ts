@@ -22,6 +22,13 @@ export default defineConfig({
       chainType: "l1",
       url: "http://127.0.0.1:8545",
     },
+    ogGalileo: {
+      type: "http",
+      chainType: "l1",
+      chainId: 16602,
+      url: configVariable("OG_RPC_URL"),
+      accounts: [configVariable("OG_DEPLOYER_PRIVATE_KEY")],
+    },
     sepolia: {
       type: "http",
       chainType: "l1",

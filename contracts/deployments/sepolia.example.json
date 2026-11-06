@@ -34,7 +34,7 @@
       "appealDuration": "120",
       "appealResolutionDuration": "300",
       "refundDelay": "300",
-      "purchaseRequiresPersonhood": true
+      "purchaseRequiresPersonhood": false
     }
   ],
   "eip712": { "name": "ConsentCraftMarket", "version": "1" },
