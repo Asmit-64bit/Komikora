@@ -1,0 +1,17 @@
+{
+  "name": "@consentcraft/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox-viem": "5.0.7",
+    "@openzeppelin/contracts": "5.6.1",
+    "hardhat": "3.21.2"
+  },
+  "scripts": {
+    "compile": "node ../node_modules/hardhat/dist/src/cli.js build",
+    "node": "node ../node_modules/hardhat/dist/src/cli.js node --hostname 127.0.0.1",
+    "test": "node ../node_modules/hardhat/dist/src/cli.js test",
+    "typecheck": "node ../node_modules/typescript/bin/tsc --noEmit"
+  }
+}
