@@ -59,7 +59,7 @@ export async function GET(req: NextRequest) {
         user: user ? publicUser(user) : null,
         projects: user ? db.projects.filter(p => p.members.some(m => m.userId === user.id)) : [],
         // Publication requires the separate wallet/contract integration.
-        comics: [], invitations,
+        comics: db.projects.filter(p => p.state === "published" || p.panels.some(panel => Boolean(panel.image))), invitations,
       });
     });
   } catch (error) { return failure(error); }
