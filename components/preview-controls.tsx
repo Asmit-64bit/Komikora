@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { Project, User } from "@/lib/preview-types";
+import type { Project, User } from "@/lib/types";
 import { Icon } from "./icons";
 
 type PreviewAction = (body: Record<string, unknown>, message?: string) => Promise<{ id?: string; token?: string }>;
@@ -11,7 +11,7 @@ export function OnchainReview({ project, dirty }: {
     <span className="eyebrow">EVERY VOICE HAS A PLACE</span>
     <h2>{project.state === "draft" ? "A little care before the next chapter." : "Give this story a little love."}</h2>
     <p className="muted">Review the artwork, credits, and terms in one place.</p>
-    <div className="chain-connect"><Icon name="shield" size={22}/><p>This is a design preview. Reviews, wallet approvals, and publishing are not connected.</p></div>
+    <div className="chain-connect"><Icon name="shield" size={22}/><p>Your draft is saved. Wallet reviews, approvals, and publishing are not connected yet.</p></div>
     <div className="review-checklist">
       <p><Icon name="image" size={17}/> {project.panels.filter(panel => panel.image).length} of 4 panels have artwork</p>
       <p><Icon name="users" size={17}/> {project.members.length} creators in the credits</p>
@@ -34,7 +34,7 @@ export function CollectibleActions({ project }: { project: Project; user: User |
 
 export function EarningsPage() {
   return <><div className="page-heading"><div><span className="eyebrow">YOUR SHARE, IN YOUR CONTROL</span><h1>Earnings from your stories.</h1><p>A home for the rewards of your creative work.</p></div></div>
-    <section className="surface earnings-card"><div className="chain-connect"><p>Connect your account when wallet integration is available to see your earnings.</p></div><div className="earnings-balance"><span>Available to withdraw</span><strong>— <small>ETH</small></strong></div><p className="muted">Balances and withdrawals will appear here once the marketplace is connected.</p><label>Recipient wallet<input placeholder="0x wallet address" disabled/></label><div className="chain-button-row"><button className="button yellow" disabled>Withdraw proceeds<Icon name="arrow" size={17}/></button></div><p className="field-hint">UI preview · No balance is being queried or transferred.</p></section></>;
+    <section className="surface earnings-card"><div className="chain-connect"><p>Connect your account when wallet integration is available to see your earnings.</p></div><div className="earnings-balance"><span>Available to withdraw</span><strong>— <small>ETH</small></strong></div><p className="muted">Balances and withdrawals will appear here once the marketplace is connected.</p><label>Recipient wallet<input placeholder="0x wallet address" disabled/></label><div className="chain-button-row"><button className="button yellow" disabled>Withdraw proceeds<Icon name="arrow" size={17}/></button></div><p className="field-hint">No balance is being queried or transferred.</p></section></>;
 }
 
 export function NetworkPage() {

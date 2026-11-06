@@ -8,5 +8,9 @@
 .wallet-preview p{font-size:12px;line-height:1.8;margin-top:12px;color:var(--muted)}
 .panel-picker button:focus-visible{outline-offset:2px}
 .sample-label{font-size:8px}
+.invitation-list{display:grid;gap:20px}
+.invitation-card h2{margin:10px 0}
+.invitation-card .button{margin-top:20px}
+.topbar-actions .sign-out{display:flex}
 @media(max-width:760px){.sidebar{visibility:hidden}.sidebar.is-open{visibility:visible}}
-@media(max-width:520px){.topbar-actions .current-user{display:none}.topbar-actions{gap:6px}.topbar-actions .prototype-chip{display:flex;font-size:7px;letter-spacing:.3px}.topbar-actions .icon-button{display:none}.topbar .button.small{padding:7px 8px}.breadcrumb strong{font-size:9px}}
+@media(max-width:520px){.topbar-actions .current-user{display:none}.topbar-actions{gap:6px}.topbar-actions .prototype-chip{display:flex;font-size:7px;letter-spacing:.3px}.topbar-actions .icon-button:not(.sign-out){display:none}.topbar .button.small{padding:7px 8px}.breadcrumb strong{font-size:9px}}

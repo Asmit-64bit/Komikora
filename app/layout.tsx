@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { PreviewProvider } from "@/components/preview-provider";
+import { StudioProvider } from "@/components/studio-provider";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -10,7 +10,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en">
-      <body><PreviewProvider>{children}</PreviewProvider></body>
+      <body><StudioProvider>{children}</StudioProvider></body>
     </html>
   );
 }
