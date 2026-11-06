@@ -1,0 +1,12 @@
+/* Subtle text stroke. To revert: delete this file and its import in app/layout.tsx. */
+body {
+  -webkit-text-stroke: 0.15px currentColor;
+  paint-order: stroke fill;
+}
+h1, h2, h3, .hero-greeting, .modal h2 {
+  -webkit-text-stroke: 0.45px currentColor;
+}
+/* Keep form fields and code crisp. */
+input, textarea, select, code, pre {
+  -webkit-text-stroke: 0;
+}
