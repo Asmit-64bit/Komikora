@@ -3,7 +3,11 @@ import { defineConfig } from "hardhat/config";
 
 export default defineConfig({
   plugins: [hardhatToolboxViem],
-  solidity: "0.8.28",
+  solidity: {
+    version: "0.8.28",
+    // The optimizer keeps ConsentCraftMarket under the 24,576-byte EIP-170 deploy limit.
+    settings: { optimizer: { enabled: true, runs: 200 } },
+  },
   networks: {
     hardhatMainnet: {
       type: "edr-simulated",

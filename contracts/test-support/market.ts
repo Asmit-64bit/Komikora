@@ -252,3 +252,29 @@ export async function createSamplePublication(f: Deployed, now: bigint, override
   });
   return { id: await f.market.read.publicationCount(), quote };
 }
+
+/** Creates and approves (unflagged report) a publication. `aiCost` defaults to the sample report's. */
+export async function createApprovedPublication(
+  f: Deployed,
+  now: bigint,
+  overrides: Partial<Quote> = {},
+  aiCost?: bigint,
+) {
+  const pub = await createSamplePublication(f, now, overrides);
+  const report = sampleReport(pub.id, pub.quote, aiCost === undefined ? {} : { aiCost });
+  const sig = await signReport(f.reporter, f.chainId, f.market.address, report);
+  await f.market.write.submitReviewReport([pub.id, report, sig]);
+  return { ...pub, aiCost: report.aiCost };
+}
+
+/** Creates, approves and publishes a publication. */
+export async function createPublishedPublication(
+  f: Deployed,
+  now: bigint,
+  overrides: Partial<Quote> = {},
+  aiCost?: bigint,
+) {
+  const pub = await createApprovedPublication(f, now, overrides, aiCost);
+  await f.market.write.publish([pub.id], { account: f.author.account });
+  return pub;
+}

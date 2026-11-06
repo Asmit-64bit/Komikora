@@ -64,7 +64,7 @@ interface IConsentCraftMarket is IConsentCraftMarketTypes {
     /// Settles with reason AppealTimeout (S - A to the author; pending product approval).
     function claimAppealTimeout(uint256 publicationId) external;
 
-    /// @notice Author lists an Approved publication.
+    /// @notice Author lists an Approved publication: Published, Listed, publishedAt and refundEligibleAt set once.
     function publish(uint256 publicationId) external;
 
     /// @notice Buyer pays exactly the price and receives a reading entitlement. The
@@ -88,7 +88,8 @@ interface IConsentCraftMarket is IConsentCraftMarketTypes {
     // Views
     // ---------------------------------------------------------------------
 
-    function hasReadingAccess(uint256 publicationId, address account) external view returns (bool);
+    /// @notice True when `wallet` holds an entitlement (bought a copy). Survives delisting.
+    function hasReadingAccess(uint256 publicationId, address wallet) external view returns (bool);
 
     function getPublication(uint256 publicationId) external view returns (Publication memory);
 

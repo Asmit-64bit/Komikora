@@ -17,7 +17,10 @@ Items marked **[OPEN]** are provisional defaults that still need a decision; see
 | `createPublication`, quote and certificate verification | Implemented |
 | Liability views (`totalCredits`, `totalLockedDeposits`, `totalLiabilities`, `liabilitiesCovered`), direct-ETH rejection | Implemented |
 | `submitReviewReport`, `appeal`, `resolveAppeal`, `finalizeRejection`, `claimAppealTimeout`, Rejected/AppealTimeout settlement, credits | Implemented |
-| Publish, purchase, refund, withdraw, `hasReadingAccess`, `saleFee`, `previewSettlement` | Not yet implemented |
+| `publish`, `purchase`, ThresholdReached settlement, `hasReadingAccess`, `saleFee`, `isRequestIdUsed` | Implemented |
+| `refundAndDelist`, `withdraw`, `previewSettlement` | Not yet implemented |
+
+The build enables the Solidity optimizer (200 runs). Without it the runtime bytecode exceeds the 24,576-byte EIP-170 limit and can't be deployed to Sepolia. A test asserts the deployed size stays under the limit.
 
 Until every function exists, the contract inherits `IConsentCraftMarketTypes` rather than `IConsentCraftMarket`, so it has no stub functions.
 
@@ -129,7 +132,7 @@ Any other combination reverts with `InvalidPolicy`. The report's richer price ce
 | Review | `aiCost` (A), `reportHash`, `score` |
 | Money | `grossSales` (R), `authorRefund` (F), `ownerAllocation` (O) |
 | States | `state` (review), `listingState`, `settlementReason` |
-| Timestamps | `createdAt`, `reviewedAt`, `flaggedAt`, `appealDeadline`, `appealedAt`, `appealResolutionDeadline`, `decidedAt`, `publishedAt`, `delistedAt`, `settledAt` |
+| Timestamps | `createdAt`, `reviewedAt`, `flaggedAt`, `appealDeadline`, `appealedAt`, `appealResolutionDeadline`, `decidedAt`, `publishedAt`, `refundEligibleAt` (= `publishedAt + refundDelay`), `delistedAt`, `settledAt` |
 
 - Publication ids are sequential from 1. A new version of a comic is a new publication.
 - The Arweave IDs are stored as `bytes32`: the 32 raw bytes of the 43-character Base64URL ID (section 10). Both must be non-zero and can never change.
@@ -167,8 +170,8 @@ Time boundaries follow the report:
 | `resolveAppeal(id, approved, reasonHash)` | `REVIEWER_ROLE` | AppealPending, `now < appealResolutionDeadline` | Approved, or Rejected and settled (`Rejected`: owner gets S − A) | Allowed |
 | `finalizeRejection(id)` | Anyone | Flagged, `now >= appealDeadline` | Rejected and settled (`Rejected`: owner gets S − A) | Allowed |
 | `claimAppealTimeout(id)` | Anyone | AppealPending, `now >= appealResolutionDeadline` | Rejected and settled (`AppealTimeout`: author gets S − A) | Allowed |
-| `publish` | Author | Approved, Unlisted | Published, Listed, `publishedAt` | Allowed |
-| `purchase` | Buyer | Published and Listed; `msg.value == price`; unused `requestId`; buyer not entitled; valid Purchase certificate if the policy requires one | Entitlement; `R += P`; fee and proceeds credited; if the deposit is unsettled and `R >= S`, settles (`ThresholdReached`) | **Blocked** |
+| `publish` | Author | Approved, Unlisted | Published, Listed; `publishedAt` and `refundEligibleAt` set once | Allowed |
+| `purchase` | Buyer | Published and Listed; `msg.value == price`; non-zero, unused `requestId`; buyer not entitled; valid PURCHASE certificate if the policy requires one | Entitlement; `R += P`; `f(P)` credited to the owner and `P − f(P)` to the author; if the deposit is unsettled and `R >= S`, settles (`ThresholdReached`: owner gets S − A). Listing stays active. | **Blocked** |
 | `refundAndDelist(id, minRefund)` | Author | Published and Listed; `now >= publishedAt + refundDelay`; `R < S`; deposit unsettled; `F >= minRefund` | Delisted, settles (`AuthorRefund`) | Allowed |
 | `withdraw` | Credit holder | Credit > 0 | Sends the full credit (`nonReentrant`, checks-effects-interactions) | Allowed |
 
@@ -193,8 +196,10 @@ There is no automatic refund or forfeiture when time passes. Delisting without a
 
 ### Entitlements
 
-- `hasReadingAccess(id, account)` returns true if `account` is the author or has purchased `id`.
-- Entitlements are permanent and survive delisting.
+- `hasReadingAccess(id, wallet)` returns true only when `wallet` holds an entitlement (bought a copy). Authors don't get one automatically. The backend's key service grants authors access to their own work by checking `getPublication(id).author`, unless the author buys a copy.
+- Entitlements are permanent and non-transferable. No function removes or moves one, so they survive delisting and pausing.
+- When the policy doesn't require personhood, `purchase` ignores the certificate arguments (pass a zeroed struct and `0x`) and doesn't consume its nonce.
+- `purchase` checks in order: publication exists, not paused, Published, Listed, exact payment (`PaymentMismatch`), `requestId != 0` (`ZeroRequestId`), unused `requestId` (`RequestIdAlreadyUsed`), not already entitled (`AlreadyEntitled`), certificate if required. A reverted purchase consumes nothing.
 - One entitlement per wallet per publication; a repeat purchase reverts. Self-purchases are allowed and count toward `R`.
 - `requestId` is a buyer-chosen, globally unique `bytes32` idempotency key.
 

@@ -123,6 +123,8 @@ describe("ConsentCraftMarket: policies, roles and publication creation", () => {
         "finalizeRejection",
         "grantRole",
         "pause",
+        "publish",
+        "purchase",
         "renounceRole",
         "resolveAppeal",
         "revokeRole",

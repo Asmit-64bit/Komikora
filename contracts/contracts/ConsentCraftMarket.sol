@@ -11,9 +11,9 @@ import {IConsentCraftMarketTypes} from "./interfaces/IConsentCraftMarketTypes.so
 /// @title ConsentCraftMarket
 /// @notice Contract layer for the ConsentCraft paid comic marketplace on Sepolia.
 /// @dev Implementation status: policies, roles, recipients, pausing, liability
-/// accounting, publication creation, review reports, appeals and rejection/timeout
-/// settlement. Publishing, purchases, refunds and withdrawals are not implemented
-/// yet; see docs/CONTRACT_SPEC.md.
+/// accounting, publication creation, review reports, appeals, rejection/timeout
+/// settlement, publishing, purchases, threshold settlement and reading access.
+/// Refunds and withdrawals are not implemented yet; see docs/CONTRACT_SPEC.md.
 /// Once they are, this contract inherits IConsentCraftMarket instead of the types-only base.
 contract ConsentCraftMarket is IConsentCraftMarketTypes, AccessControl, Pausable, EIP712 {
     // ---------------------------------------------------------------------
@@ -59,6 +59,9 @@ contract ConsentCraftMarket is IConsentCraftMarketTypes, AccessControl, Pausable
     mapping(uint256 nonce => bool) private _quoteNonceUsed;
     mapping(uint256 nonce => bool) private _certificateNonceUsed;
     mapping(bytes32 jobId => bool) private _jobIdUsed;
+    mapping(bytes32 requestId => bool) private _requestIdUsed;
+    /// @dev Non-transferable reading entitlements. There is no function that removes one.
+    mapping(uint256 publicationId => mapping(address wallet => bool)) private _entitled;
 
     // ---------------------------------------------------------------------
     // Construction and direct-payment rejection
@@ -312,6 +315,63 @@ contract ConsentCraftMarket is IConsentCraftMarketTypes, AccessControl, Pausable
     }
 
     // ---------------------------------------------------------------------
+    // Publishing and purchases
+    // ---------------------------------------------------------------------
+
+    /// @notice Author lists an Approved publication. Not pausable: it creates no new exposure.
+    /// @dev Approved is reachable only once and publish leaves it, so publishedAt is set once.
+    function publish(uint256 publicationId) external {
+        Publication storage p = _existing(publicationId);
+        if (msg.sender != p.author) revert NotAuthor(publicationId, msg.sender);
+        _requireState(publicationId, p, PublicationState.Approved);
+        if (p.listingState != ListingState.Unlisted) revert InvalidListingState(publicationId, p.listingState);
+
+        uint64 nowTs = uint64(block.timestamp);
+        p.publishedAt = nowTs;
+        p.refundEligibleAt = nowTs + _policies[p.policyId].refundDelay;
+        p.listingState = ListingState.Listed;
+        _setState(publicationId, p, PublicationState.Published);
+        emit PublicationPublished(publicationId, p.price, p.refundEligibleAt);
+    }
+
+    /// @notice Buys one non-transferable reading entitlement at the frozen price.
+    /// @dev Effects only (credits), no external calls. The certificate is checked and
+    /// consumed only when the frozen policy requires personhood; otherwise it is ignored.
+    function purchase(
+        uint256 publicationId,
+        bytes32 requestId,
+        PersonhoodCertificate calldata certificate,
+        bytes calldata certificateSignature
+    ) external payable whenNotPaused {
+        Publication storage p = _existing(publicationId);
+        _requireState(publicationId, p, PublicationState.Published);
+        if (p.listingState != ListingState.Listed) revert InvalidListingState(publicationId, p.listingState);
+        if (msg.value != p.price) revert PaymentMismatch(p.price, msg.value);
+        if (requestId == bytes32(0)) revert ZeroRequestId();
+        if (_requestIdUsed[requestId]) revert RequestIdAlreadyUsed(requestId);
+        if (_entitled[publicationId][msg.sender]) revert AlreadyEntitled(publicationId, msg.sender);
+        if (_policies[p.policyId].purchaseRequiresPersonhood) {
+            _consumeCertificate(certificate, certificateSignature, PersonhoodAction.Purchase);
+        }
+
+        _requestIdUsed[requestId] = true;
+        _entitled[publicationId][msg.sender] = true;
+        uint256 price = msg.value;
+        uint256 fee = _saleFee(_policies[p.policyId], price);
+        p.grossSales += price;
+
+        emit Purchased(publicationId, msg.sender, requestId, price, fee, price - fee, p.grossSales);
+        _credit(ownerRecipient, publicationId, CreditKind.PlatformFee, fee);
+        _credit(p.author, publicationId, CreditKind.SaleProceeds, price - fee);
+
+        // Threshold settlement: once R >= S, the remaining deposit S - A goes to the owner,
+        // exactly once (the settlementReason guard). The listing stays active.
+        if (p.settlementReason == SettlementReason.None && p.grossSales >= p.deposit) {
+            _settle(publicationId, p, SettlementReason.ThresholdReached, 0, p.deposit - p.aiCost);
+        }
+    }
+
+    // ---------------------------------------------------------------------
     // Views
     // ---------------------------------------------------------------------
 
@@ -346,6 +406,23 @@ contract ConsentCraftMarket is IConsentCraftMarketTypes, AccessControl, Pausable
 
     function isJobIdUsed(bytes32 jobId) external view returns (bool) {
         return _jobIdUsed[jobId];
+    }
+
+    function isRequestIdUsed(bytes32 requestId) external view returns (bool) {
+        return _requestIdUsed[requestId];
+    }
+
+    /// @notice True when `wallet` bought `publicationId`. Entitlements are never revoked,
+    /// so this stays true after delisting. Authors read their own work via the backend's
+    /// author check unless they buy a copy.
+    function hasReadingAccess(uint256 publicationId, address wallet) external view returns (bool) {
+        return _entitled[publicationId][wallet];
+    }
+
+    /// @notice f(P) = max(minFee, floor(P * feeBps / 10000)) under a policy.
+    function saleFee(uint256 policyId, uint256 price) external view returns (uint256) {
+        if (policyId == 0 || policyId > policyCount) revert UnknownPolicy(policyId);
+        return _saleFee(_policies[policyId], price);
     }
 
     // ---------------------------------------------------------------------
@@ -389,6 +466,12 @@ contract ConsentCraftMarket is IConsentCraftMarketTypes, AccessControl, Pausable
     function _hasRoleSignature(bytes32 role, bytes32 digest, bytes calldata signature) internal view returns (bool) {
         (address signer, ECDSA.RecoverError err,) = ECDSA.tryRecover(digest, signature);
         return err == ECDSA.RecoverError.NoError && hasRole(role, signer);
+    }
+
+    /// @dev f(P) <= P for every listed price, because feeBps <= 10000 and price >= minPrice > minFee.
+    function _saleFee(Policy storage policy, uint256 price) private view returns (uint256) {
+        uint256 proportional = (price * policy.feeBps) / MAX_BPS;
+        return proportional > policy.minFee ? proportional : policy.minFee;
     }
 
     function _existing(uint256 publicationId) private view returns (Publication storage) {

@@ -37,9 +37,9 @@ This guide covers who calls and signs what, and which event each step emits. The
 
 | Step | Who | On chain | Event(s) |
 | --- | --- | --- | --- |
-| If the policy has `purchaseRequiresPersonhood`, the backend signs a single-use `PersonhoodCertificate` (`action` = 1 PURCHASE) for the buyer. The buyer generates a unique `requestId`. | Backend, buyer | None | None |
+| If the policy has `purchaseRequiresPersonhood`, the backend signs a single-use `PersonhoodCertificate` (`action` = 1 PURCHASE) for the buyer. Otherwise the buyer passes a zeroed certificate and `0x`. The buyer generates a unique, non-zero `requestId`. | Backend, buyer | None | None |
 | `purchase(id, requestId, cert, certSig)` with `msg.value = price` | Buyer | Entitlement; `R += P`; credits | `Purchased`, `Credited(PlatformFee)`, `Credited(SaleProceeds)`, and if `R >= S` for the first time: `DepositSettled(ThresholdReached)`, `Credited(OwnerAllocation)` |
-| The key service checks `hasReadingAccess(id, buyer)` against a confirmed block before it releases the content key over an authenticated channel. | Backend | View call | None |
+| The key service checks `hasReadingAccess(id, wallet)` against a confirmed block, or that `wallet` is the publication's `author`, before it releases the content key over an authenticated channel. | Backend | View call | None |
 | `refundAndDelist(id, minRefund)` once `now >= publishedAt + refundDelay`, with `R < S` and an unsettled deposit. Pass `minRefund` from `previewSettlement` to guard against a concurrent purchase. | Author | Delisted and settled | `PublicationDelisted`, `DepositSettled(AuthorRefund)`, `Credited(DepositRefund / OwnerAllocation)` |
 | `withdraw()` | Any credit holder | Credit set to 0, ETH sent | `Withdrawn` |
 

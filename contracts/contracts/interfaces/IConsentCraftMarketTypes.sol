@@ -111,6 +111,7 @@ interface IConsentCraftMarketTypes {
         uint64 appealResolutionDeadline;
         uint64 decidedAt; // final approval or rejection
         uint64 publishedAt;
+        uint64 refundEligibleAt; // publishedAt + policy.refundDelay
         uint64 delistedAt;
         uint64 settledAt;
     }
@@ -300,6 +301,7 @@ interface IConsentCraftMarketTypes {
     error RefundBelowMinimum(uint256 refund, uint256 minRefund);
 
     error PaymentMismatch(uint256 expected, uint256 received);
+    error ZeroRequestId();
     error RequestIdAlreadyUsed(bytes32 requestId);
     error AlreadyEntitled(uint256 publicationId, address buyer);
 
