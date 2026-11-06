@@ -43,7 +43,7 @@ The retained legacy market uses its original `PersonhoodCertificate` ABI and `pu
 
 Flagged/borderline results go to a human appeal. The target response deadline is 72 hours; the pilot requires a staffed reviewer and does not auto-approve missed deadlines. The author may reopen unminted work for corrections. Outstanding mint permits must expire first; their deadline uses the later of the chain block timestamp and server clock plus ten minutes. Already-minted works cannot be reopened. Decisions include a public reason while appeal text stays private to the author and reviewer.
 
-Signed-in users can report infringement/abuse, limited to ten reports per day. The NFT moderation panel lets the designated reviewer resolve reports and delist on chain. This is a reporting and sale-stoppage mechanism, not a full legal takedown/remedy system. Public Arweave data cannot be erased. Illegal-content handling, access restrictions required by law, refunds for unavailable content, reviewer staffing and operating budgets need an explicit launch policy. There is no automatic clawback of settled NFT sales.
+Signed-in users can report infringement/abuse, limited to ten reports per day. The designated reviewer can resolve reports through the protected backend and delist directly on chain. The public app has no administrative page. This is a reporting and sale-stoppage mechanism, not a full legal takedown/remedy system. Public Arweave data cannot be erased. Illegal-content handling, access restrictions required by law, refunds for unavailable content, reviewer staffing and operating budgets need an explicit launch policy. There is no automatic clawback of settled NFT sales.
 
 ## Local setup
 

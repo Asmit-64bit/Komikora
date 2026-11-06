@@ -108,3 +108,33 @@
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* Keep every navigation link and Help in view as the available height shrinks. */
+@media (max-height: 800px) {
+  .sidebar { padding-top: clamp(12px, 2.5dvh, 20px); padding-bottom: clamp(12px, 2.5dvh, 20px); }
+  .sidebar-note h3 { font-size: 24px; }
+  .sidebar-note p { display: none; }
+  .sidebar-note .text-button { margin-top: 12px; }
+}
+
+@media (max-height: 680px) {
+  .sidebar-note { display: none; }
+}
+
+@media (max-height: 560px) {
+  .workspace-label, .nav-caption, .sidebar-footer { display: none; }
+  .sidebar nav { margin-top: 16px; }
+}
+
+@media (max-height: 440px) {
+  .sidebar .nav-item { min-height: 34px; padding-top: 4px; padding-bottom: 4px; }
+  .sidebar-bottom { padding-top: 8px; }
+}
+
+@media (max-height: 360px) {
+  .sidebar .nav-item { min-height: 30px; font-size: 12px; }
+}
+
+@media (forced-colors: active) {
+  html { scrollbar-color: auto; }
+}

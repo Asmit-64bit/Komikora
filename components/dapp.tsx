@@ -339,69 +339,6 @@ export function AccountPage({ user, signIn }: { user: User | null; signIn: () =>
   </>;
 }
 
-/* ──────────────────────────────── Admin ──────────────────────────────── */
-
-function useRole(role: "DEFAULT_ADMIN_ROLE" | "REVIEWER_ROLE" | "PAUSER_ROLE", account?: Address) {
-  const { data: roleId } = useReadContract({ address: MARKET, abi: consentCraftMarketAbi, functionName: role, chainId: MARKET_CHAIN_ID, query: { enabled: !!MARKET } });
-  const { data } = useReadContract({ address: MARKET, abi: consentCraftMarketAbi, functionName: "hasRole", args: roleId && account ? [roleId, account] : undefined, chainId: MARKET_CHAIN_ID, query: { enabled: !!roleId && !!account } });
-  return !!data;
-}
-
-function AppealCard({ listing, onDone }: { listing: Listing; onDone: () => void }) {
-  const write = useMarketWrite();
-  const [notes, setNotes] = useState<{ evidence?: { text: string } } | null>(null);
-  const [reason, setReason] = useState("");
-  const [step, setStep] = useState("");
-  const [error, setError] = useState("");
-  useEffect(() => { api<{ evidence?: { text: string } }>(`/api/appeal?publicationId=${listing.publicationId}`).then(setNotes).catch(e => setError(friendly(e))); }, [listing.publicationId]);
-  const decide = (approved: boolean) => async () => {
-    setError(""); setStep(approved ? "Approving…" : "Rejecting…");
-    try {
-      const { hash } = await api<{ hash: Hex }>("/api/appeal", { kind: "reason", publicationId: listing.publicationId, text: reason });
-      await write({ functionName: "resolveAppeal", args: [BigInt(listing.publicationId), approved, hash] });
-      onDone();
-    } catch (e) { setError(friendly(e)); }
-    finally { setStep(""); }
-  };
-  return <div className="chain-proof"><strong>#{listing.publicationId} · {listing.title}</strong> by {truncateAddress(listing.author)}
-    <p>Author&apos;s evidence: {notes?.evidence?.text ?? "(not stored on this server)"}</p>
-    <label className="field-label">Your reason (private; its hash goes on chain)<textarea value={reason} maxLength={4000} onChange={e => setReason(e.target.value)}/></label>
-    <div className="chain-button-row"><button className="button purple" disabled={!!step || !reason.trim()} onClick={decide(true)}>Approve</button><button className="button" disabled={!!step || !reason.trim()} onClick={decide(false)}>Reject</button><span>{step}</span></div>
-    {error && <p className="form-error">{error}</p>}</div>;
-}
-
-export function AdminPage() {
-  const { address } = useAccount();
-  const write = useMarketWrite();
-  const isAdmin = useRole("DEFAULT_ADMIN_ROLE", address);
-  const isReviewer = useRole("REVIEWER_ROLE", address);
-  const isPauser = useRole("PAUSER_ROLE", address);
-  const { listings, reload } = useListings();
-  const [error, setError] = useState("");
-  const { data: paused, refetch: refetchPaused } = useReadContract({ address: MARKET, abi: consentCraftMarketAbi, functionName: "paused", chainId: MARKET_CHAIN_ID, query: { enabled: !!MARKET } });
-  const { data: covered } = useReadContract({ address: MARKET, abi: consentCraftMarketAbi, functionName: "liabilitiesCovered", chainId: MARKET_CHAIN_ID, query: { enabled: !!MARKET } });
-  const { data: liabilities } = useReadContract({ address: MARKET, abi: consentCraftMarketAbi, functionName: "totalLiabilities", chainId: MARKET_CHAIN_ID, query: { enabled: !!MARKET } });
-  if (!MARKET) return <NotDeployed/>;
-  const appeals = (listings ?? []).filter(l => l.state === PublicationState.AppealPending);
-  const counts = (listings ?? []).reduce<Record<number, number>>((acc, l) => ({ ...acc, [l.state]: (acc[l.state] ?? 0) + 1 }), {});
-  return <>
-    <div className="page-heading"><div><div className="eyebrow">ROLES ARE CHECKED ON CHAIN</div><h1>Admin console.</h1><p>Your wallet {truncateAddress(address)} holds: {[isAdmin && "admin", isReviewer && "reviewer", isPauser && "pauser"].filter(Boolean).join(", ") || "no market roles"}.</p></div></div>
-    <section className="surface network-card">
-      <h3>Contract health</h3>
-      <div className="chain-links"><span>{paused ? "PAUSED" : "Running"}</span><span>Liabilities {eth(liabilities)}</span><span>{covered ? "Fully covered by balance" : "NOT covered"}</span>
-        {Object.entries(counts).map(([state, n]) => <span key={state}>{PublicationStateLabels[Number(state)]}: {n}</span>)}</div>
-      {isPauser && <button className="button" onClick={async () => { setError(""); try { await write({ functionName: paused ? "unpause" : "pause", args: [] }); await refetchPaused(); } catch (e) { setError(friendly(e)); } }}>{paused ? "Unpause deposits and purchases" : "Pause deposits and purchases"}</button>}
-      {error && <p className="form-error">{error}</p>}
-      <h3>Appeals waiting for a reviewer</h3>
-      {!isReviewer ? <p className="muted">Only wallets with REVIEWER_ROLE can resolve appeals.</p> : appeals.length === 0 ? <p className="muted">No pending appeals.</p> : appeals.map(l => <AppealCard key={l.publicationId} listing={l} onDone={() => void reload()}/>)}
-      <h3>All publications</h3>
-      {(listings ?? []).map(l => <div key={l.publicationId} className="chain-history"><Link href={`/comics/${l.publicationId}`}>#{l.publicationId} {l.title}</Link> · {PublicationStateLabels[l.state]} · {ListingStateLabels[l.listingState]} · sales {eth(l.grossSales)} · {SettlementReasonLabels[l.settlement]}</div>)}
-    </section>
-  </>;
-}
-
-/* ─────────────────────────────── Network ─────────────────────────────── */
-
 export function NetworkPage() {
   const [status, setStatus] = useState<Record<string, unknown> | null>(null);
   useEffect(() => { api("/api/status").then(setStatus).catch(() => setStatus({})); }, []);
