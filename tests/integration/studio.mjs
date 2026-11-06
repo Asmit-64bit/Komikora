@@ -23,7 +23,7 @@ const base = `http://127.0.0.1:${port}`;
 let server, output = "", completed = false;
 async function start() {
   server = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start", "--hostname", "127.0.0.1", "--port", String(port)], {
-    cwd: process.cwd(), env: { ...process.env, CONSENTCRAFT_DATA_NAMESPACE: namespace }, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
+    cwd: process.cwd(), env: { ...process.env, CONSENTCRAFT_DATA_NAMESPACE: namespace, APP_ORIGIN: base, RATE_LIMIT_MULTIPLIER: "100" }, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
   });
   server.stdout.on("data", chunk => output += chunk);
   server.stderr.on("data", chunk => output += chunk);

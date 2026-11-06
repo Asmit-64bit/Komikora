@@ -25,7 +25,7 @@ export async function walletAuth(req: NextRequest, body: Record<string, unknown>
   const origin = req.headers.get("origin")!; // Validated by the route before entry.
   const token = req.cookies.get(SESSION_COOKIE)?.value;
   const browserChallenge = req.cookies.get(CHALLENGE_COOKIE)?.value;
-  const cookieOptions = { httpOnly: true, sameSite: "strict" as const, secure: req.nextUrl.protocol === "https:", path: "/" };
+  const cookieOptions = { httpOnly: true, sameSite: "strict" as const, secure: origin.startsWith("https:"), path: "/" };
   db.walletChallenges ??= [];
 
   if (action === "logout") {

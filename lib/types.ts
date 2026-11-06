@@ -1,4 +1,4 @@
-export type User = { id: string; name: string; color: string; address: `0x${string}` };
+export type User = { id: string; name: string; color: string; address: `0x${string}`; worldIdVerifiedAt?: string };
 export type Member = { userId: string; name: string; role: string; share: number; address?: string };
 export type Panel = { image: string; dialogue: string; alt: string };
 export type Project = {
@@ -11,6 +11,7 @@ export type Project = {
   chainTransactions?: ChainTransaction[];
   chainError?: string;
   publicationId?: string;
+  publication?: PublicationView;
 };
 export type ChainReview = {
   salt: `0x${string}`; projectKey: `0x${string}`; chainId: number; contract: `0x${string}`;
@@ -25,3 +26,21 @@ export type ChainConfig = { chainId: number; name: string; contract?: `0x${strin
 export type Invitation = { id: string; projectId: string; address: `0x${string}`; expiresAt: string; accepted: boolean };
 export type IncomingInvitation = Invitation & { projectTitle: string; ownerName: string };
 export type AppData = { user: User | null; projects: Project[]; comics: Project[]; invitations: IncomingInvitation[] };
+
+/** Client-safe publishing state. Content keys and review rationale stay server-side. */
+export type PublicationStatus = "quoted" | "created" | "reviewing" | "reviewed" | "review_failed";
+export type PublicationView = {
+  status: PublicationStatus;
+  chainId: number; market: `0x${string}`;
+  author: `0x${string}`;
+  publicationId?: string;
+  manifestHash: `0x${string}`; previewManifestHash: `0x${string}`; previewImageHash?: `0x${string}`;
+  bundleTxId: string; previewTxId: string; previewImageTxId: string;
+  pageCount: number; language: string;
+  priceWei: string; depositWei: string; aiCapWei: string; policyId: string;
+  quote?: Record<string, string | number>; quoteSignature?: `0x${string}`; quoteExpiresAt?: number;
+  createTx?: `0x${string}`;
+  review?: { score: number; flagged: boolean; aiCostWei: string; model: string; provider: string; teeVerified: boolean; inputTokens: number; outputTokens: number; tx?: `0x${string}`; at: string };
+  reviewError?: string;
+  updatedAt: string;
+};

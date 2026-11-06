@@ -6,7 +6,44 @@ Choose **Connect wallet**, select your wallet in RainbowKit, and choose **Sign m
 
 Authentication is wallet-only. Email/password forms and login endpoints are disabled. The backend does not implement the reference repository's NFT economics or send email.
 
-The **ConsentCraftMarket contract** (publishing, purchases, review, refunds, withdrawals) is implemented and tested but not yet deployed: see [contracts/README.md](contracts/README.md). The **Arkiv indexer** that projects its events into a public marketplace index is in [indexer/](indexer/README.md). The UI does not call the contract or the Arkiv index yet; AI review and World ID remain unconnected.
+## How the dApp works
+
+Money, ownership and reading access live in the **ConsentCraftMarket** contract ([contracts/README.md](contracts/README.md)). Every money-moving action is a transaction sent from the user's own wallet. The server never holds user funds.
+
+| Step | Who | What happens |
+| --- | --- | --- |
+| Verify | Every account, once | **World ID 4** proves the account belongs to a unique human. One human per account. Required to publish and to buy (the sample policy sets `purchaseRequiresPersonhood`). |
+| Publish | Author's wallet | The server encrypts every panel and caption (AES-256-GCM) and uploads the ciphertext to **Arweave**, plus a small public cover and preview manifest. It reads each upload back, checks its hash, and signs a quote. The author's wallet calls `createPublication` with the deposit. |
+| AI review | Server, on **0G Compute** | The server fetches the exact Arweave bundle the contract fingerprints, decrypts it and sends downscaled pages to a TEE-verified 0G vision model. The response's TEE signature must verify. The AI cost is the real token bill (`tokens × provider's on-chain price`, converted to ETH and capped at `aiCap`). A relayer submits the signed report. On any failure nothing is signed and the deposit stays locked and safe. |
+| List | Author's wallet | `publish` puts an approved comic on sale. A flagged comic can be appealed: the evidence stays private and only its salted hash goes on chain. Reviewers resolve appeals from the **Admin** page. |
+| Buy and read | Buyer's wallet | `purchase` pays the author (minus the platform fee) and records reading access. The server decrypts pages only for wallets where `hasReadingAccess` is true at a confirmed block, or for the author. |
+| Refund | Author's wallet | After the refund delay, `refundAndDelist` returns `deposit − max(sales, AI cost, deposit/4)`. **The AI cost is always deducted.** The UI passes the exact `previewSettlement` refund as `minRefund`, so a last-second purchase can't silently shrink it. |
+| Withdraw | Anyone with credits | `withdraw` pays out sale proceeds and refunds. |
+
+Pages: **Marketplace** (on-chain listings with Arweave previews), a comic page (buy or read), **Review & publish** inside each project, **Earnings** (credits, withdraw, purchases), **Admin** (roles checked on chain: appeals, pause, contract health) and **Network** (which integrations this server has configured). The **Arkiv indexer** that projects contract events into a public index is in [indexer/](indexer/README.md).
+
+Collaborator shares are recorded in the studio but are not enforced on chain: the contract pays the project owner's wallet.
+
+### Run it against a local chain
+
+```sh
+npm run contracts:node                 # terminal 1: Hardhat chain on 127.0.0.1:8545
+npm run contracts:deploy:local         # terminal 2: prints the market address
+```
+
+Put these in `.env.local` (created by `npm run env:setup`), then run `npm run dev`. Hardhat accounts 3 and 4 hold the quote-signer and reporter roles; their keys are Hardhat's public development keys and must never be used on a real network.
+
+```sh
+NEXT_PUBLIC_CHAIN_ID=31337
+NEXT_PUBLIC_MARKETPLACE_ADDRESS=<printed address>
+CHAIN_RPC_URL=http://127.0.0.1:8545
+QUOTE_SIGNER_PRIVATE_KEY=<QUOTE_SIGNER_PRIVATE_KEY from contracts/local-node.env>
+REPORTER_PRIVATE_KEY=<REPORTER_PRIVATE_KEY from contracts/local-node.env>
+RELAYER_PRIVATE_KEY=<any funded Hardhat key>
+ARWEAVE_UPLOAD_PRIVATE_KEY=<any new key; the ar.io sandbox is free up to 5 MiB per item>
+```
+
+World ID and 0G need your own accounts (see `.env.example`). Without them those steps report "not configured" instead of pretending to succeed. `npm run zg -- providers` lists live 0G providers and prices.
 
 ## Prerequisites
 

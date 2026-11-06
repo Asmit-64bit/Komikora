@@ -9,7 +9,8 @@ const nextConfig: NextConfig = {
   partialPrefetching: true,
   // A transitive wallet connector imports CDP's Node SDK. Keep its optional
   // payment modules lazy instead of resolving unused peers during SSR bundling.
-  serverExternalPackages: ["@coinbase/cdp-sdk"],
+  // The 0G and Turbo SDKs load crypto and wasm modules dynamically; run them from node_modules.
+  serverExternalPackages: ["@coinbase/cdp-sdk", "@0gfoundation/0g-compute-ts-sdk", "@ardrive/turbo-sdk", "ethers", "circomlibjs"],
   // The copied design uses plain CSS, which Turbopack handles natively.
   devIndicators: false,
 };

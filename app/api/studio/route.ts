@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { AppError, database, ensure, event, id, publicUser, sessionUser, text } from "@/lib/store";
 import { walletAuth, walletAddress, SESSION_COOKIE } from "@/lib/wallet-auth";
 import { validateImage } from "@/lib/images";
+import { checkOrigin, rateLimit } from "@/lib/server/http";
 import type { Panel, Project } from "@/lib/types";
 
 const headers = { "Cache-Control": "no-store" };
@@ -15,9 +16,7 @@ function failure(error: unknown) {
 }
 
 async function readBody(req: NextRequest): Promise<Record<string, unknown>> {
-  const origin = req.headers.get("origin");
-  const host = req.headers.get("host");
-  ensure(host && (origin === `http://${host}` || origin === `https://${host}`), "Request origin is not allowed.", 403);
+  checkOrigin(req);
   ensure(req.headers.get("content-type")?.split(";")[0].trim() === "application/json", "Send JSON data.", 415);
   ensure(Number(req.headers.get("content-length") || 0) <= MAX_BODY, "This upload is too large.", 413);
   const reader = req.body?.getReader();
@@ -71,6 +70,7 @@ export async function POST(req: NextRequest) {
     return await database(async db => {
       const action = b.action;
       const token = req.cookies.get(SESSION)?.value;
+      if (action === "challenge" || action === "siwe") rateLimit(req, "wallet-sign-in", 20);
       const authResponse = await walletAuth(req, b, db);
       if (authResponse) return authResponse;
       ensure(action !== "signup" && action !== "login", "Use your wallet to sign in. Email and password authentication is disabled.", 400);

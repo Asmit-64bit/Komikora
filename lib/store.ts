@@ -17,6 +17,13 @@ export type Database = {
   projects: Project[];
   invitations: (Invitation | LegacyInvitation)[];
   walletChallenges?: WalletChallenge[];
+  worldIdRequests?: { nonce: string; userId: string; expires: number }[];
+  /** sha256(rp id + nullifier) -> user id. Enforces one human per account. */
+  worldIdNullifiers?: Record<string, string>;
+  /** Server-only publishing secrets, keyed by project id. Never returned to clients. */
+  publicationSecrets?: Record<string, { wrappedKey: string; reviewReport?: unknown }>;
+  /** Private appeal evidence and reviewer reasons. Only salted hashes go on chain. */
+  appealNotes?: Record<string, { evidence?: { text: string; salt: string; hash: string; at: string }; reason?: { text: string; salt: string; hash: string; at: string } }>;
 };
 
 const namespace = process.env.CONSENTCRAFT_DATA_NAMESPACE || "studio";
@@ -65,7 +72,7 @@ export async function database<T>(fn: (db: Database) => T | Promise<T>, write = 
 
 export function id() { return randomBytes(32).toString("hex"); }
 export function publicUser(account: User): User {
-  return { id: account.id, name: account.name, address: account.address, color: account.color };
+  return { id: account.id, name: account.name, address: account.address, color: account.color, ...(account.worldIdVerifiedAt ? { worldIdVerifiedAt: account.worldIdVerifiedAt } : {}) };
 }
 export function sessionUser(db: Database, token?: string) {
   const session = token && db.sessions.find(s => s.token === token && s.auth === "wallet" && s.expires > Date.now());
