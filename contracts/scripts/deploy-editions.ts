@@ -15,10 +15,13 @@ const [wallet] = await viem.getWalletClients();
 const artifact = JSON.parse(readFileSync("artifacts/contracts/ConsentCraftEditions.sol/ConsentCraftEditions.json", "utf8"));
 const gas = await client.estimateGas({ account: wallet.account.address, data: encodeDeployData({ abi: artifact.abi, bytecode: artifact.bytecode, args: [getAddress(signer), getAddress(treasury)] }) });
 const fees = await client.estimateFeesPerGas(); const fee = fees.maxFeePerGas || await client.getGasPrice();
-if (await client.getBalance({ address: wallet.account.address }) < gas * fee * 12n / 10n) throw new Error("Deployment wallet needs more test ETH for estimated gas.");
+const gasLimit = (gas * 12n + 9n) / 10n;
+if (await client.getBalance({ address: wallet.account.address }) < gasLimit * fee) throw new Error("Deployment wallet needs more test ETH for estimated gas.");
 console.log(`Chain ${chainId}; deployer ${wallet.account.address}; reviewer ${getAddress(signer)}; treasury ${getAddress(treasury)}; estimated gas ${gas}`);
 if (process.env.DEPLOY_PREFLIGHT === "1") { console.log("Preflight passed. No transaction submitted."); process.exit(0); }
-const { contract: deployed, deploymentTransaction } = await viem.sendDeploymentTransaction("ConsentCraftEditions", [getAddress(signer), getAddress(treasury)]);
+// Reuse the successful estimate: a second implicit estimate may use an RPC's
+// lower default cap, especially after Sepolia's state-creation gas repricing.
+const { contract: deployed, deploymentTransaction } = await viem.sendDeploymentTransaction("ConsentCraftEditions", [getAddress(signer), getAddress(treasury)], { gas: gasLimit, maxFeePerGas: fee, maxPriorityFeePerGas: fees.maxPriorityFeePerGas || 0n });
 const receipt = await client.waitForTransactionReceipt({ hash: deploymentTransaction.hash, confirmations: chainId === 31337 ? 1 : 3 });
 if (receipt.status !== "success") throw new Error("Deployment reverted.");
 const code = await client.getCode({ address: deployed.address }); if (!code || code === "0x") throw new Error("Deployment code could not be verified.");

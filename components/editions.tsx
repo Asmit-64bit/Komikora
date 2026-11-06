@@ -1,6 +1,6 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAccount, useConfig, usePublicClient, useSwitchChain, useWriteContract } from "wagmi";
@@ -32,20 +32,31 @@ function useNftWrite() {
 }
 function errorText(e: unknown) { return (e as { shortMessage?: string }).shortMessage || (e as Error).message || "Request failed."; }
 
-export function EditionPublish({ project: p, dirty, refresh }: { project: Project; dirty: boolean; refresh: () => Promise<void> }) {
+export function EditionPublish({ project: p, dirty, refresh, onSave, saving = false }: { project: Project; dirty: boolean; refresh: () => Promise<void>; onSave?: () => void; saving?: boolean }) {
   const { data } = useStudio(); const write = useNftWrite();
   const [supply, setSupply] = useState(1); const [rights, setRights] = useState(false); const [busy, setBusy] = useState(""); const [error, setError] = useState(""); const [appeal, setAppeal] = useState("");
   const [reserve, setReserve] = useState("0.01"); const [hours, setHours] = useState(24);
+  const requirementsId = useId();
+  const requirements: string[] = [];
+  if (!editionsAddress) requirements.push("NFT publishing is waiting for its contract deployment. Your saved comic is safe; checking the rights box does not complete this setup.");
+  if (dirty) requirements.push("Save your latest comic changes before submitting for review.");
+  if (!p.edition) {
+    if (!rights) requirements.push("Confirm that you have permission from every rights holder.");
+    if (!p.panels.length || p.panels.some(panel => !panel.image)) requirements.push("Add artwork to every panel, then save your comic.");
+    if (!p.terms.trim()) requirements.push("Add and save a reading license in Team & shares.");
+    if (!Number.isInteger(supply) || supply < 1 || supply > 25) requirements.push("Choose a whole-number edition supply from 1 to 25.");
+    if (!/^(0|[1-9]\d*)(\.\d{1,18})?$/.test(reserve) || parseEther(reserve) <= BigInt(0)) requirements.push("Enter a positive auction reserve with up to 18 decimal places.");
+    if (!Number.isFinite(hours) || hours < 1 || hours > 720) requirements.push("Choose an auction duration from 1 to 720 hours.");
+  }
   async function run(label: string, work: () => Promise<unknown>) { setBusy(label); setError(""); try { await work(); } catch (e) { setError(errorText(e)); } finally { await refresh().catch(() => {}); setBusy(""); } }
   if (data.user?.id !== p.ownerId) return <section className="surface"><h2>NFT publishing</h2><p>The project owner submits and mints editions after obtaining permission from all rights holders. Primary proceeds and royalties go to that creator wallet; collaborator shares remain a separate agreement.</p></section>;
   return <section className="surface review-surface"><span className="eyebrow">FIXED SUPPLY · TRANSFERABLE READING LICENSE</span><h2>Publish NFT editions</h2>
     <p>Full pages stay encrypted. A resized preview of panel 1 becomes the public cover. The current edition owner receives reading access after confirmation. Copyright stays with the creators.</p>
-    {!editionsAddress && <p className="info-banner">NFT publishing is not available yet. The studio operator can check its setup on the Network page.</p>}
-    {!p.edition && <><label>Edition supply<input aria-label="Edition supply" type="number" min="1" max="25" value={supply} onChange={e => setSupply(Number(e.target.value))}/></label><label>First-auction reserve (ETH)<input value={reserve} onChange={e => setReserve(e.target.value)} inputMode="decimal"/></label><label>First-auction duration (hours)<input type="number" min="1" max="720" value={hours} onChange={e => setHours(Number(e.target.value))}/></label><p>1–25 editions per version. Supply, license, content and first-auction terms freeze at submission. Five submissions per wallet account per day.</p><label><input type="checkbox" checked={rights} onChange={e => setRights(e.target.checked)}/> I own this work or have permission from every rights holder to publish it under the saved license.</label></>}
+    {!p.edition && <><label>Edition supply<input aria-label="Edition supply" type="number" min="1" max="25" value={supply} onChange={e => setSupply(Number(e.target.value))}/></label><label>First-auction reserve (ETH)<input value={reserve} onChange={e => setReserve(e.target.value)} inputMode="decimal"/></label><label>First-auction duration (hours)<input type="number" min="1" max="720" value={hours} onChange={e => setHours(Number(e.target.value))}/></label><p>1–25 editions per version. Supply, license, content and first-auction terms freeze at submission. Five submissions per wallet account per day.</p><label className="rights-confirmation"><input type="checkbox" checked={rights} onChange={e => setRights(e.target.checked)}/><span>I own this work or have permission from every rights holder to publish it under the saved license.</span></label></>}
     <p>Publishing has no platform deposit or forfeiture. The operator funds storage and inference during the pilot. Wallet transactions cost gas. Primary sales charge 2.5%; secondary ETH sales charge 2.5% plus a 5% creator royalty. Swaps have no platform fee.</p>
     {p.edition?.review && <div className="chain-proof"><strong>Review score {(p.edition.review.score / 100).toFixed(0)}/100</strong><p>{p.edition.review.reasons.join(" · ")}</p>{p.edition.review.assessment && <p>Completeness: {p.edition.review.assessment.completeness} · Legibility: {p.edition.review.assessment.legibility} · Page order: {p.edition.review.assessment.pageOrder}</p>}<p>{p.edition.review.model} · {p.edition.review.promptVersion} · {p.edition.review.verification === "gateway-reported" ? "Private computation · provider checks reported by 0G gateway" : p.edition.review.teeVerified ? "Provider signature checked" : p.edition.review.provider === "deterministic" ? "Deterministic check" : "No verified attestation returned"}</p><p className="edition-wallet">Request {p.edition.review.requestId || "not applicable"}</p><p>{p.edition.review.uncertainty}</p></div>}
     {p.edition?.error && <p role="status">{p.edition.error}</p>}
-    {(!p.edition || p.edition.status === "uploaded") && <button className="button purple" disabled={!!busy || dirty || !editionsAddress || (!p.edition && !rights)} onClick={() => run("Reviewing comic images…", () => editionRequest({ action: "review", id: p.id, revision: p.revision, supply, rights, reserveWei: parseEther(reserve).toString(), auctionDuration: Math.round(hours * 3600) }))}>{busy || "Submit for curator review"}</button>}
+    {(!p.edition || p.edition.status === "uploaded") && <><div id={requirementsId} className="publication-requirements" role="status">{requirements.length > 0 && <><strong>Before you submit</strong><ul>{requirements.map(message => <li key={message}>{message}</li>)}</ul>{!editionsAddress && <Link className="text-button" href="/network">View publishing setup →</Link>}{dirty && onSave && <button className="text-button" disabled={saving || !!busy} onClick={onSave}>{saving ? "Saving…" : "Save latest changes"}</button>}</>}</div><button className="button purple" aria-describedby={requirementsId} disabled={!!busy || saving || requirements.length > 0} onClick={() => run("Reviewing comic images…", () => editionRequest({ action: "review", id: p.id, revision: p.revision, supply, rights, reserveWei: parseEther(reserve).toString(), auctionDuration: Math.round(hours * 3600) }))}>{busy || "Submit for curator review"}</button></>}
     {p.edition?.status === "approved" && <><p>Review is complete. Confirm minting this comic and its saved first-auction terms in your wallet.</p>
     <button className="button purple" disabled={!!busy || dirty || !editionsAddress} onClick={() => run("Preparing approved mint…", async () => {
       const prepared = await editionRequest<{ permit: { author: Hex; key: Hex; manifestHash: Hex; metadataHash: Hex; uriHash: Hex; licenseHash: Hex; auctionHash: Hex; supply: number; deadline: string }; uri: string; signature: Hex }>({ action: "prepare", id: p.id });

@@ -1,4 +1,4 @@
-export type User = { id: string; name: string; color: string; address: `0x${string}` };
+export type User = { id: string; name: string; username?: string; color: string; address: `0x${string}` };
 export type Member = { userId: string; name: string; role: string; share: number; address?: string };
 export type Panel = { image: string; dialogue: string; alt: string };
 export type Project = {
