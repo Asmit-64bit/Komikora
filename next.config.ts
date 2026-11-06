@@ -7,14 +7,8 @@ const nextConfig: NextConfig = {
   },
   cacheComponents: true,
   partialPrefetching: true,
-  turbopack: {
-    rules: {
-      "*.css": {
-        loaders: ["@tailwindcss/turbopack"],
-        as: "*.css",
-      },
-    },
-  },
+  // The copied design uses plain CSS, which Turbopack handles natively.
+  devIndicators: false,
 };
 
 export default nextConfig;
