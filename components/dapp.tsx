@@ -6,7 +6,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useAccount, useChainId, usePublicClient, useReadContract, useSwitchChain, useWriteContract } from "wagmi";
 import { formatEther, type Address, type Hash, type Hex } from "viem";
-import { IDKitRequestWidget, proofOfHuman, type IDKitResult, type RpContext } from "@worldcoin/idkit";
 import type { Project, User } from "@/lib/types";
 import {
   consentCraftMarketAbi, explorerAddress, explorerTx, getMarketplaceAddress, ListingState, ListingStateLabels, MARKET_CHAIN_ID,
@@ -61,41 +60,6 @@ function friendly(error: unknown) {
   if (/User rejected|denied/i.test(message)) return "You cancelled the request in your wallet.";
   return message.split("\n")[0].slice(0, 300);
 }
-
-/* ─────────────────────────────── World ID ─────────────────────────────── */
-
-type WorldStart = { app_id: `app_${string}`; action: string; signal: string; environment: "production" | "staging"; rp_context: RpContext };
-
-export function WorldIdVerify({ user, onVerified }: { user: User; onVerified: () => void | Promise<void> }) {
-  const [config, setConfig] = useState<WorldStart | null>(null);
-  const [open, setOpen] = useState(false);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  if (user.worldIdVerifiedAt) {
-    return <div className="chain-success"><Icon name="check" size={16}/> Verified human with World ID since {new Date(user.worldIdVerifiedAt).toLocaleDateString()}.</div>;
-  }
-  const start = async () => {
-    setError(""); setBusy(true);
-    try { setConfig(await api<WorldStart>("/api/personhood", { step: "start" })); setOpen(true); }
-    catch (e) { setError(friendly(e)); }
-    finally { setBusy(false); }
-  };
-  return <div className="chain-connect">
-    <p><strong>Verify you are a unique human.</strong> World ID proves personhood without revealing who you are. Each person can verify one ConsentCraft account; publishing and buying require it.</p>
-    <button className="button yellow" disabled={busy} onClick={start}><Icon name="shield" size={17}/>{busy ? "Preparing…" : "Verify with World ID"}</button>
-    {config && <IDKitRequestWidget
-      open={open} onOpenChange={setOpen}
-      app_id={config.app_id} action={config.action} rp_context={config.rp_context} environment={config.environment}
-      allow_legacy_proofs={false} preset={proofOfHuman({ signal: config.signal })}
-      handleVerify={async (result: IDKitResult) => { await api("/api/personhood", { step: "complete", result: result as unknown as Record<string, unknown> }); }}
-      onSuccess={() => { setConfig(null); void onVerified(); }}
-      onError={code => setError(`World ID did not complete (${String(code)}).`)}
-    />}
-    {error && <p className="form-error" role="alert">{error}</p>}
-  </div>;
-}
-
-/* ────────────────────────────── Publishing ────────────────────────────── */
 
 type Prepared = {
   publication: NonNullable<Project["publication"]>;
@@ -167,7 +131,6 @@ export function PublishPanel({ project, user, dirty, refresh, notify }: { projec
   const busy = !!step;
   return <section className="surface review-surface">
     {heading}
-    <WorldIdVerify user={user} onVerified={refresh}/>
     {wrongWallet && <p className="form-error">Your connected wallet ({truncateAddress(address)}) is not the signed-in account ({truncateAddress(user.address)}).</p>}
 
     {(!pub || pub.status === "quoted") && <>
@@ -180,7 +143,7 @@ export function PublishPanel({ project, user, dirty, refresh, notify }: { projec
       <label className="field-label">Language of the comic<input value={language} maxLength={35} disabled={busy || !!pub} onChange={e => setLanguage(e.target.value)} placeholder="en"/></label>
       {pub && <p className="field-hint">Already stored on Arweave: bundle <code>{pub.bundleTxId}</code>. Publishing again re-signs the quote without re-uploading.</p>}
       <div className="chain-button-row">
-        <button className="button purple" disabled={busy || dirty || wrongWallet || !isConnected || !user.worldIdVerifiedAt} onClick={publishOnChain}><Icon name="book" size={17}/>{step || "Publish on chain"}</button>
+        <button className="button purple" disabled={busy || dirty || wrongWallet || !isConnected} onClick={publishOnChain}><Icon name="book" size={17}/>{step || "Publish on chain"}</button>
         {pub && <button className="text-button" disabled={busy} onClick={() => run("Reopening…", () => api("/api/publish", { action: "cancel", id: project.id }))}>Reopen for editing</button>}
         {pub && <button className="text-button" disabled={busy} onClick={() => run("Looking for your transaction…", () => api("/api/publish", { action: "confirm", id: project.id }))}>I already sent the transaction</button>}
       </div>
@@ -304,8 +267,8 @@ export function ListingPage({ publicationId, user, signIn }: { publicationId: st
       let certificate = { wallet: "0x0000000000000000000000000000000000000000" as Address, action: 0, expiresAt: BigInt(0), nonce: BigInt(0) };
       let signature: Hex = "0x";
       if (policy.purchaseRequiresPersonhood) {
-        setStep("Getting your personhood certificate…");
-        const result = await api<{ certificate: Record<string, string | number>; signature: Hex }>("/api/personhood", { step: "certificate", action: "purchase" });
+        setStep("Authorizing this wallet purchase…");
+        const result = await api<{ certificate: Record<string, string | number>; signature: Hex }>("/api/market/authorization", { action: "purchase" });
         certificate = { wallet: result.certificate.wallet as Address, action: Number(result.certificate.action), expiresAt: BigInt(result.certificate.expiresAt), nonce: BigInt(result.certificate.nonce) };
         signature = result.signature;
       }
@@ -334,8 +297,7 @@ export function ListingPage({ publicationId, user, signIn }: { publicationId: st
             : !sessionMatches ? <p className="form-error">Your connected wallet is not the signed-in account. Sign in again with this wallet.</p>
             : canRead ? <button className="button purple" disabled={!!step} onClick={read}><Icon name="book" size={17}/>{step || (isAuthor ? "Read your comic" : "Read your copy")}</button>
             : forSale ? <>
-              {policy?.purchaseRequiresPersonhood && <WorldIdVerify user={user} onVerified={() => window.location.reload()}/>}
-              <button className="button purple" disabled={!!step || (policy?.purchaseRequiresPersonhood && !user.worldIdVerifiedAt)} onClick={buy}><Icon name="spark" size={17}/>{step || `Buy for ${eth(listing.price)}`}</button>
+              <button className="button purple" disabled={!!step || !isConnected} onClick={buy}><Icon name="spark" size={17}/>{step || `Buy for ${eth(listing.price)}`}</button>
               <p className="field-hint">Paid on chain to the author (minus the platform fee). Your access is recorded in the contract and never expires.</p>
             </> : <p className="muted">This comic is not on sale.</p>}
           <TxLink hash={lastTx}/>
@@ -367,7 +329,6 @@ export function AccountPage({ user, signIn }: { user: User | null; signIn: () =>
   return <>
     <div className="page-heading"><div><div className="eyebrow">YOUR WALLET ON CHAIN</div><h1>Earnings &amp; library.</h1><p>Sale proceeds, deposit refunds and credits are held by the contract until you withdraw them.</p></div></div>
     <section className="surface earnings-card">
-      <WorldIdVerify user={user} onVerified={() => window.location.reload()}/>
       <div className="earnings-balance"><span>Withdrawable now</span><strong>{eth(credit)}</strong></div>
       <button className="button purple" disabled={!credit || !!step} onClick={async () => { setError(""); setStep("Withdrawing…"); try { await write({ functionName: "withdraw", args: [] }); await refetch(); } catch (e) { setError(friendly(e)); } finally { setStep(""); } }}>{step || "Withdraw to my wallet"}</button>
       {error && <p className="form-error" role="alert">{error}</p>}

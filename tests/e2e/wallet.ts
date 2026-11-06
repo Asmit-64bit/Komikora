@@ -13,6 +13,7 @@ export async function installWallet(page: Page, wallets: PrivateKeyAccount[]) {
     let selected: string = address;
     let authorized = sessionStorage.getItem("test-wallet-authorized") === "yes";
     let rejectNext = false;
+    const requests: { method: string; params: unknown[] }[] = [];
     const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
     const emit = (event: string, value: unknown) => listeners.get(event)?.forEach(callback => callback(value));
     const provider = {
@@ -22,6 +23,7 @@ export async function installWallet(page: Page, wallets: PrivateKeyAccount[]) {
       },
       removeListener(event: string, callback: (...args: unknown[]) => void) { listeners.get(event)?.delete(callback); },
       async request({ method, params = [] }: { method: string; params?: unknown[] }) {
+        requests.push({ method, params });
         if (method === "eth_chainId") return "0x1";
         if (method === "net_version") return "1";
         if (method === "eth_accounts") return authorized ? [selected] : [];
@@ -46,6 +48,7 @@ export async function installWallet(page: Page, wallets: PrivateKeyAccount[]) {
     window.addEventListener("eip6963:requestProvider", announce);
     announce();
     Object.assign(window, { walletTest: {
+      getRequests() { return requests; },
       rejectNextSignature() { rejectNext = true; },
       switchAccount(next: string) { selected = next; authorized = true; emit("accountsChanged", [next]); },
       disconnect() { authorized = false; sessionStorage.removeItem("test-wallet-authorized"); emit("accountsChanged", []); },
@@ -53,4 +56,4 @@ export async function installWallet(page: Page, wallets: PrivateKeyAccount[]) {
   }, { address: wallets[0].address });
 }
 
-export type WalletTestWindow = Window & { walletTest: { rejectNextSignature(): void; switchAccount(address: string): void; disconnect(): void } };
+export type WalletTestWindow = Window & { walletTest: { getRequests(): { method: string; params: unknown[] }[]; rejectNextSignature(): void; switchAccount(address: string): void; disconnect(): void } };

@@ -101,7 +101,7 @@ A test fails if the committed ABI differs from the compiled contract.
 
 ## Known limitations
 
-- **Personhood certificates are a trusted backend bridge.** The backend verifies World ID off chain and signs a single-use certificate. The contract checks the signature, not a World ID proof.
+- **Legacy certificate names remain for compatibility.** The backend signs a single-use action authorization after wallet-session authentication. The contract checks the signature; this supplies no personhood or identity assurance. The active NFT contract does not use these certificates.
 - **The contract can't verify Arweave contents or availability.** It stores the two transaction IDs and hashes it's given. The backend confirms availability and hashes before signing a quote, and the reporter checks again before signing a report.
 - **Arkiv is only an index.** It's rebuilt from contract events, and it is never an authority for payments, entitlements or settlements.
 - **Arweave uploads can't be deleted.** Encrypted bundles and previews are permanent and public. If a content key leaks, the bundle can't be withdrawn, and a takedown can only stop key delivery. Never upload keys or plaintext paid pages.

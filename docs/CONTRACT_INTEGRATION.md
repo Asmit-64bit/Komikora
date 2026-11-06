@@ -21,7 +21,7 @@ All amounts are native ETH in wei (`bigint` in TypeScript; decimal strings in JS
 | Arweave | Stores encrypted bundles and public previews | The contract can't verify contents or availability. Uploads are permanent. |
 | Arkiv | Public index built from contract events | Never a source of truth for money or access. |
 
-Personhood certificates are a **trusted backend bridge**: the backend verifies World ID off chain and signs a certificate. The contract doesn't verify World ID proofs itself.
+The legacy `PersonhoodCertificate` name is retained for ABI compatibility. The backend now issues these certificates from authenticated wallet sessions; they authorize an action and provide no identity or human-uniqueness guarantee. NFT editions do not use them.
 
 ## 2. Actors and keys
 
@@ -135,7 +135,7 @@ Signed by `QUOTE_SIGNER_ROLE`, only after the backend has confirmed both Arweave
 PersonhoodCertificate(address wallet,uint8 action,uint64 expiresAt,uint256 nonce)      action: 0 = PUBLISH, 1 = PURCHASE
 ```
 
-Signed by `QUOTE_SIGNER_ROLE` after the backend's World ID check. It is single use (the nonce is consumed), bound to `wallet == msg.sender` and to one action. It isn't bound to a publication. `purchase` checks it only when the policy has `purchaseRequiresPersonhood`; otherwise pass a zeroed certificate and `"0x"`.
+Signed by `QUOTE_SIGNER_ROLE` after authenticating the wallet session. It is single use (the nonce is consumed), bound to `wallet == msg.sender` and to one action. It isn't bound to a publication. `purchase` checks it only when the policy has `purchaseRequiresPersonhood`; otherwise pass a zeroed certificate and `"0x"`.
 
 ### 5.3 ReviewReport
 
@@ -182,7 +182,7 @@ const quote: PublicationQuote = {
 };
 const quoteSignature = await signPublicationQuote(quoteSigner, chainId, market, quote);
 
-// 2. After World ID verification for this wallet and action:
+// 2. After wallet-session authentication for this wallet and action:
 const certificate: PersonhoodCertificate = {
   wallet: author, action: PersonhoodAction.Publish,
   expiresAt: quote.expiresAt, nonce: randomNonce(),
@@ -272,7 +272,7 @@ Access survives delisting and pausing.
 
 ## 9. Never put on chain, Arweave or Arkiv
 
-Content keys, plaintext paid pages, World ID proofs or nullifiers, appeal text, review rationale and personal data. Only salted hashes (`evidenceHash`, `reasonHash`, `reportHash`) go on chain. `requestId` and `jobId` must be random, not derived from order or user data. Arweave uploads are permanent and can't be deleted.
+Content keys, plaintext paid pages, appeal text, review rationale and personal data. Only salted hashes (`evidenceHash`, `reasonHash`, `reportHash`) go on chain. `requestId` and `jobId` must be random, not derived from order or user data. Arweave uploads are permanent and can't be deleted.
 
 ## 10. Recovery and idempotency
 

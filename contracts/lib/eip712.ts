@@ -111,7 +111,7 @@ export function signPublicationQuote(signer: Signer, chainId: number, market: Ad
   });
 }
 
-/** QUOTE_SIGNER_ROLE: trusted bridge from the backend's World ID check. Single use. */
+/** QUOTE_SIGNER_ROLE: legacy wallet authorization; the EIP-712 type name is retained for ABI compatibility. Single use. */
 export function signPersonhoodCertificate(
   signer: Signer,
   chainId: number,

@@ -1,4 +1,4 @@
-export type User = { id: string; name: string; color: string; address: `0x${string}`; worldIdVerifiedAt?: string; worldIdEnvironment?: string };
+export type User = { id: string; name: string; color: string; address: `0x${string}` };
 export type Member = { userId: string; name: string; role: string; share: number; address?: string };
 export type Panel = { image: string; dialogue: string; alt: string };
 export type Project = {
@@ -19,7 +19,7 @@ export type EditionPublication = {
   supply: number; license: string; rightsAt: string; status: "uploaded" | "flagged" | "approved" | "minted";
   chainId: number; contract: `0x${string}`; comicId?: string; uri?: string; metadataHash?: `0x${string}`;
   permitExpiresAt?: number;
-  reserveWei?: string; auctionDuration?: number; approvalId?: string;
+  reserveWei?: string; auctionDuration?: number;
   review?: { score: number; flagged: boolean; reasons: string[]; model: string; provider: string; teeVerified: boolean; at: string; promptVersion: string; uncertainty: string; requestId?: string; verification?: string; evidence?: { verification: "gateway-reported"; verdicts: Record<string, string>; osImage?: string; composeHash?: string }; assessment?: { completeness: string; legibility: string; pageOrder: string } };
   error?: string; appeal?: { text: string; at: string; deadline: string; decision?: "approved" | "rejected"; reason?: string; reviewer?: string };
 };

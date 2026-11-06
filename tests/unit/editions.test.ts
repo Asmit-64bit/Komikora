@@ -2,8 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { privateKeyToAccount } from "viem/accounts";
 import type { Database } from "@/lib/store";
 import sharp from "sharp";
-const state = vi.hoisted(() => ({ db: {} as Database, bytes: new Map<string, Uint8Array>(), flags: false, fail: false, reads: [] as boolean[], manifest: "0x" as `0x${string}`, reviewer: "", counter: 0, blockOffset: 1000, approved: true }));
-vi.mock("@/lib/server/agent-pass", () => ({ reservePublicationApproval: async () => { if (!state.approved) throw new Error("Publication not approved"); return BigInt(Math.floor(Date.now() / 1000) + 900); } }));
+const state = vi.hoisted(() => ({ db: {} as Database, bytes: new Map<string, Uint8Array>(), flags: false, fail: false, reads: [] as boolean[], manifest: "0x" as `0x${string}`, reviewer: "", counter: 0, blockOffset: 1000 }));
 vi.mock("@/lib/store", async original => {
   const actual = await original<typeof import("@/lib/store")>();
   return { ...actual, database: async (work: (db: Database) => unknown) => work(state.db) };
@@ -32,17 +31,15 @@ describe("edition publishing and ownership-gated pages", () => {
   beforeEach(async () => {
     const key = `0x${"11".repeat(32)}` as const; state.reviewer = privateKeyToAccount(key).address;
     process.env.EDITION_REVIEWER_PRIVATE_KEY = key; process.env.CONTENT_KEY_ENCRYPTION_KEY = key;
-    state.flags = false; state.fail = false; state.reads = []; state.bytes.clear(); state.counter = 0; state.blockOffset = 1000; state.approved = true;
+    state.flags = false; state.fail = false; state.reads = []; state.bytes.clear(); state.counter = 0; state.blockOffset = 1000;
     const image = `data:image/jpeg;base64,${(await sharp({ create: { width: 8, height: 8, channels: 3, background: "red" } }).jpeg().toBuffer()).toString("base64")}`;
-    state.db = { users: [{ id: "owner", address: state.reviewer as `0x${string}`, name: "Creator", color: "purple", worldIdVerifiedAt: new Date().toISOString() }], sessions: [{ token: "session", userId: "owner", expires: Date.now() + 100000, auth: "wallet" }], invitations: [], projects: [{ id: "project", ownerId: "owner", title: "Test comic", description: "", genre: "Fantasy", theme: "", terms: "Reading license", revision: 1, version: 0, state: "draft", rosterFrozen: false, approvals: [], events: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), panels: Array.from({ length: 4 }, () => ({ image, dialogue: "Secret dialogue", alt: "Comic panel" })), members: [{ userId: "owner", address: state.reviewer as `0x${string}`, name: "Creator", role: "Artist", share: 10000 }] }] };
+    state.db = { users: [{ id: "owner", address: state.reviewer as `0x${string}`, name: "Creator", color: "purple" }], sessions: [{ token: "session", userId: "owner", expires: Date.now() + 100000, auth: "wallet" }], invitations: [], projects: [{ id: "project", ownerId: "owner", title: "Test comic", description: "", genre: "Fantasy", theme: "", terms: "Reading license", revision: 1, version: 0, state: "draft", rosterFrozen: false, approvals: [], events: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), panels: Array.from({ length: 4 }, () => ({ image, dialogue: "Secret dialogue", alt: "Comic panel" })), members: [{ userId: "owner", address: state.reviewer as `0x${string}`, name: "Creator", role: "Artist", share: 10000 }] }] };
   });
   const submit = () => prepareEdition("session", { id: "project", revision: 1, supply: 2, rights: true });
-  it("requires signature login, personhood, rights and a valid supply", async () => {
+  it("requires signature login, rights and a valid supply", async () => {
     await expect(prepareEdition(undefined, { id: "project" })).rejects.toThrow(/Sign in/);
     await expect(prepareEdition("session", { id: "project", revision: 1, supply: 2 })).rejects.toThrow(/permission/);
     await expect(prepareEdition("session", { id: "project", revision: 1, supply: 26, rights: true })).rejects.toThrow(/1–25/);
-    state.db.users[0].worldIdVerifiedAt = undefined;
-    await expect(submit()).rejects.toThrow(/World ID/);
   });
   it("encrypts pages, signs approved content and freezes supply and license", async () => {
     const result = await submit(); const e = state.db.projects[0].edition!;
@@ -72,7 +69,7 @@ describe("edition publishing and ownership-gated pages", () => {
     await expect(prepareEdition(undefined, { id: "project" })).rejects.toThrow(/Sign in/);
     expect(state.db.projects[0].edition!.error).toBe("Creator-only status");
   });
-  it("enforces the verified creator quota across reopened and separate submissions", async () => {
+  it("enforces the wallet account quota across reopened and separate submissions", async () => {
     state.db.editionSubmissions = Array.from({ length: 5 }, () => ({ userId: "owner", at: Date.now() }));
     await expect(submit()).rejects.toThrow(/five submissions/);
     expect(state.db.projects[0].edition).toBeUndefined();
@@ -82,11 +79,24 @@ describe("edition publishing and ownership-gated pages", () => {
     await expect(reopenEdition("session", "project")).rejects.toThrow(/permit is still valid/);
     expect(state.db.projects[0].state).toBe("review");
   });
-  it("does not issue a mint permit before publication approval", async () => {
-    state.approved = false;
+  it("allows a wallet-only creator to mint after review with a short-lived permit", async () => {
     const review = await prepareEdition("session", { id: "project", revision: 1, supply: 2, rights: true, reviewOnly: true });
     expect(review).toEqual({ reviewReady: true });
-    await expect(submit()).rejects.toThrow(/not approved/);
     expect(state.db.projects[0].edition!.permitExpiresAt).toBeUndefined();
+    const prepared = await submit();
+    if (!("permit" in prepared)) throw new Error("Expected a mint permit");
+    const blockTime = Math.floor(Date.now() / 1000) + state.blockOffset;
+    expect(Number(prepared.permit.deadline)).toBeGreaterThanOrEqual(blockTime + 599);
+    expect(Number(prepared.permit.deadline)).toBeLessThanOrEqual(blockTime + 601);
+    expect(state.db.projects[0].edition!.permitExpiresAt).toBe(Number(prepared.permit.deadline));
+    const metadata = JSON.parse(Buffer.from(state.bytes.get(prepared.uri.slice(5))!).toString());
+    expect(metadata.creator).toBe(state.reviewer);
+    expect(metadata).not.toHaveProperty("creatorVerified");
+  });
+  it("allows reopening only after the last issued permit expires", async () => {
+    await submit(); state.blockOffset += 601;
+    await reopenEdition("session", "project");
+    expect(state.db.projects[0].edition).toBeUndefined();
+    expect(state.db.projects[0].state).toBe("draft");
   });
 });

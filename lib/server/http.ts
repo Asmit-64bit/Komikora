@@ -2,6 +2,7 @@ import "server-only";
 import { NextResponse, type NextRequest } from "next/server";
 import { AppError, ensure } from "@/lib/store";
 import { NotConfiguredError, envValue } from "./env";
+import { configuredAppOrigin } from "./app-origin";
 
 const headers = { "Cache-Control": "no-store" };
 export const json = (body: unknown, status = 200) =>
@@ -18,9 +19,9 @@ export function failure(error: unknown) {
  * phishing site that relays requests with its own Host header cannot obtain a session.
  */
 export function allowedOrigin(req: NextRequest): string {
-  const configured = envValue("APP_ORIGIN") || envValue("NEXT_PUBLIC_APP_URL");
-  if (configured) return new URL(configured).origin;
-  if (process.env.NODE_ENV === "production") throw new NotConfiguredError("Sign-in", ["APP_ORIGIN"]);
+  const configured = configuredAppOrigin();
+  if (configured) return configured;
+  if (process.env.NODE_ENV === "production" || process.env.VERCEL === "1") throw new NotConfiguredError("Sign-in", ["APP_ORIGIN"]);
   // Development only: accept the request's own host.
   return `${req.nextUrl.protocol}//${req.headers.get("host")}`;
 }

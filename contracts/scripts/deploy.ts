@@ -38,7 +38,7 @@ const SAMPLE_POLICY = {
   appealDuration: 2n * 60n,
   appealResolutionDuration: 5n * 60n,
   refundDelay: 5n * 60n,
-  purchaseRequiresPersonhood: true,
+  purchaseRequiresPersonhood: false,
 };
 const SAMPLE_POLICY_LABEL = "SAMPLE demo policy - testnet values, not approved launch configuration";
 

@@ -35,7 +35,7 @@ The build enables the Solidity optimizer (200 runs). Without it the runtime byte
 
 The contract cannot verify Arweave contents or availability. Before signing a quote, the backend confirms that both transactions are available and match `manifestHash` and `previewManifestHash`. The reporter checks them again before signing a review report.
 
-Keys and plaintext paid pages are never placed on Arweave, on Arkiv, in calldata or in events. Personhood certificates are a trusted attestation bridge from the backend's World ID check. They are not on-chain World ID verification.
+Keys and plaintext paid pages are never placed on Arweave, on Arkiv, in calldata or in events. The legacy `PersonhoodCertificate` ABI name now represents a backend wallet-session authorization. It provides no external identity or human-uniqueness guarantee. NFT editions do not use it.
 
 ## 2. Symbols and formulas
 

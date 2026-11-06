@@ -9,7 +9,6 @@ import { fetchVerified, upload, gatewayUrl } from "./arweave";
 import { screenWith0G, SCREENING_PROMPT_VERSION } from "./zg";
 import { privateKey } from "./env";
 import { confirmedNFT, nftConfig } from "./nft-chain";
-import { reservePublicationApproval } from "./agent-pass";
 
 function owner(db: Database, token: string | undefined, id: unknown) {
   const user = sessionUser(db, token); ensure(user, "Sign in with your wallet.", 401);
@@ -28,15 +27,13 @@ export async function prepareEdition(token: string | undefined, body: Record<str
   try {
     let snapshot = await database(db => {
       const { user, project } = owner(db, token, projectId);
-      ensure(user.worldIdVerifiedAt, "Verify with World ID before publishing.", 403);
-      ensure(cfg.chainId === 31337 || !user.worldIdEnvironment || user.worldIdEnvironment === "production", "Test identities cannot publish on a public deployment.", 403);
       ensure(!project.publication, "This project uses the legacy publishing flow. Create a new project for NFT editions.", 409);
       ensure(project.edition?.status !== "minted", "These editions are already minted.", 409);
       if (!project.edition) {
         ensure(project.state === "draft" && project.revision === body.revision, "Save your latest changes first.", 409);
         ensure(body.rights === true, "Confirm you have permission from all rights holders.");
         const recent = (db.editionSubmissions || []).filter(p => p.userId === user.id && p.at > Date.now() - 86400000);
-        ensure(recent.length < LIMIT, "The pilot allows five submissions per verified creator per day.", 429);
+        ensure(recent.length < LIMIT, "The pilot allows five submissions per wallet account per day.", 429);
         ensure(Number.isInteger(body.supply) && Number(body.supply) >= 1 && Number(body.supply) <= 25, "Choose 1–25 editions.");
         const reserve = String(body.reserveWei || "10000000000000000");
         ensure(/^\d{1,78}$/.test(reserve) && BigInt(reserve) > BigInt(0) && BigInt(reserve) < BigInt(2) ** BigInt(256), "Choose a positive auction reserve.");
@@ -91,9 +88,11 @@ export async function prepareEdition(token: string | undefined, body: Record<str
 
 async function permitFor(project: Project, cfg: ReturnType<typeof nftConfig>, token?: string) {
   const e = project.edition!;
-  const deadline = await reservePublicationApproval(token, project);
+  const blockTime = (await cfg.client.getBlock()).timestamp;
+  const now = BigInt(Math.floor(Date.now() / 1000));
+  const deadline = (blockTime > now ? blockTime : now) + BigInt(10 * 60);
   if (!e.uri) {
-    const metadata = { name: project.title, description: project.description, image: `ar://${e.coverTxId}`, genre: project.genre, creator: project.members[0].address, creatorVerified: true, editionSupply: e.supply, license: e.license, firstAuction: { reserveWei: e.reserveWei || "10000000000000000", duration: e.auctionDuration || 86400 }, copyright: "Copyright remains with the creators. Reading license follows current ownership.", manifestHash: e.manifestHash, review: e.review, reviewOverride: e.appeal?.decision === "approved" ? { decision: "approved", reason: e.appeal.reason, reviewer: e.appeal.reviewer } : undefined };
+    const metadata = { name: project.title, description: project.description, image: `ar://${e.coverTxId}`, genre: project.genre, creator: project.members[0].address, editionSupply: e.supply, license: e.license, firstAuction: { reserveWei: e.reserveWei || "10000000000000000", duration: e.auctionDuration || 86400 }, copyright: "Copyright remains with the creators. Reading license follows current ownership.", manifestHash: e.manifestHash, review: e.review, reviewOverride: e.appeal?.decision === "approved" ? { decision: "approved", reason: e.appeal.reason, reviewer: e.appeal.reviewer } : undefined };
     const bytes = new TextEncoder().encode(JSON.stringify(metadata));
     const tx = await upload(bytes, "application/json", [{ name: "App-Name", value: "ConsentCraft" }, { name: "Type", value: "nft-metadata" }]);
     e.uri = `ar://${tx}`; e.metadataHash = keccak256(bytes);
@@ -105,8 +104,13 @@ async function permitFor(project: Project, cfg: ReturnType<typeof nftConfig>, to
   ensure(getAddress(reviewer) === getAddress(signer.address), "NFT reviewer key does not match the contract.", 503);
   const auctionHash = keccak256(encodeAbiParameters([{ type: "uint256" }, { type: "uint64" }], [BigInt(e.reserveWei || "10000000000000000"), BigInt(e.auctionDuration || 86400)]));
   const permit = { author: getAddress(project.members[0].address!), key: e.key, manifestHash: e.manifestHash, metadataHash: e.metadataHash!, uriHash: keccak256(toHex(e.uri)), licenseHash: keccak256(toHex(e.license)), auctionHash, supply: e.supply, deadline };
+  // Reserve the expiry before signing so reopening cannot race a live permit.
+  await database(db => {
+    const stored = owner(db, token, project.id).project.edition;
+    ensure(stored?.status === "approved" && stored.key === e.key && stored.manifestHash === e.manifestHash, "Publication changed. Refresh and retry.", 409);
+    stored.permitExpiresAt = Math.max(stored.permitExpiresAt || 0, Number(deadline));
+  }, true);
   const signature = await signer.signTypedData({ domain: { name: "ConsentCraftEditions", version: "1", chainId: cfg.chainId, verifyingContract: cfg.address }, types: editionPermitTypes, primaryType: "Permit", message: permit });
-  await database(db => { const stored = db.projects.find(p => p.id === project.id)!.edition!; stored.permitExpiresAt = Number(permit.deadline); }, true);
   return { permit: { ...permit, deadline: permit.deadline.toString() }, uri: e.uri, signature };
 }
 
@@ -154,7 +158,7 @@ export async function nftMetadata(uri: string, hash: Hex) {
   ensure(/^ar:\/\/[a-zA-Z0-9_-]{43}$/.test(uri), "Unsupported metadata reference.");
   const bytes = await fetchVerified(uri.slice(5), hash, { attempts: 1, delayMs: 0 });
   const m = JSON.parse(Buffer.from(bytes).toString("utf8"));
-  return { title: String(m.name).slice(0, 100), description: String(m.description || "").slice(0, 1000), genre: String(m.genre || ""), license: String(m.license || ""), cover: /^ar:\/\/[\w-]{43}$/.test(m.image) ? gatewayUrl(m.image.slice(5)) : undefined, creatorVerified: m.creatorVerified === true, review: m.review, reviewOverride: m.reviewOverride, firstAuction: m.firstAuction };
+  return { title: String(m.name).slice(0, 100), description: String(m.description || "").slice(0, 1000), genre: String(m.genre || ""), license: String(m.license || ""), cover: /^ar:\/\/[\w-]{43}$/.test(m.image) ? gatewayUrl(m.image.slice(5)) : undefined, review: m.review, reviewOverride: m.reviewOverride, firstAuction: m.firstAuction };
 }
 export async function editionAppeal(token: string | undefined, body: Record<string, unknown>) {
   const cfg = nftConfig();

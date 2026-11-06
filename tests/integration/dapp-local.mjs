@@ -5,14 +5,13 @@
 // Real: Hardhat chain + the deployed ConsentCraftMarket, the production app build,
 // SIWE sign-in, EIP-712 quotes and certificates, every transaction, AES-GCM
 // encryption, and uploads to the ar.io testnet sandbox (free, needs internet).
-// Not live here: World ID (needs your registered app; the test marks its two
-// accounts verified in the data file) and 0G (needs a funded 0G wallet; the test
-// checks that the review fails safely, then submits a report with the reporter key).
+// Not live here: 0G inference needs a funded wallet. The test checks that an
+// unconfigured review fails safely, then submits a report with the reporter key.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { randomBytes, randomUUID } from "node:crypto";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import path from "node:path";
 import sharp from "sharp";
@@ -66,7 +65,6 @@ try {
   const port = await freePort();
   const base = `http://127.0.0.1:${port}`;
   const namespace = `dapp-${randomUUID()}`;
-  const dataFile = path.join(root, ".data", namespace, "studio.json");
   run(process.execPath, ["node_modules/next/dist/bin/next", "start", "--hostname", "127.0.0.1", "--port", String(port)], {
     env: {
       ...process.env, CONSENTCRAFT_DATA_NAMESPACE: namespace, APP_ORIGIN: base, RATE_LIMIT_MULTIPLIER: "100",
@@ -96,11 +94,6 @@ try {
     const { message } = await c.call("/api/studio", { action: "challenge", address: account.address, chainId: 31337 });
     await c.call("/api/studio", { action: "siwe", message, signature: await account.signMessage({ message }) });
   }
-  async function markWorldIdVerified(address) {
-    const db = JSON.parse(await readFile(dataFile, "utf8"));
-    db.users.find(u => u.address.toLowerCase() === address.toLowerCase()).worldIdVerifiedAt = new Date().toISOString();
-    await writeFile(dataFile, JSON.stringify(db));
-  }
   const send = async (account, functionName, args, value) => {
     const hash = await wallet(account).writeContract({ address: market, abi: MARKET_ABI, functionName, args, value });
     const receipt = await chain.waitForTransactionReceipt({ hash });
@@ -114,10 +107,11 @@ try {
   await signIn(a, author); await signIn(b, buyer); await signIn(s, stranger);
   log("three wallets signed in with SIWE");
 
-  // 3. Certificates are refused until World ID verification.
-  await b.call("/api/personhood", { step: "certificate", action: "purchase" }, 403);
-  await b.call("/api/personhood", { step: "start" }, 503); // World ID app not configured here
-  log("certificate refused without World ID; World ID reports not configured");
+  // 3. Legacy ABI certificates now authorize the signed-in wallet only.
+  const authorization = await b.call("/api/market/authorization", { action: "purchase" });
+  assert.equal(authorization.certificate.wallet.toLowerCase(), buyer.address.toLowerCase());
+  await client().call("/api/market/authorization", { action: "purchase" }, 401);
+  log("legacy purchase authorization is bound to the wallet session");
 
   // 4. Author drafts a 4-panel comic.
   const { id } = await a.call("/api/studio", { action: "create", title: "The Lantern Keeper", description: "A lighthouse at the end of the world.", genre: "Fantasy" });
@@ -128,9 +122,6 @@ try {
   await a.call("/api/studio", { action: "save", id, revision: project.revision, title: project.title, description: project.description, panels, members: project.members, terms: project.terms, priceWei: parseEther("0.001").toString() });
   project = (await a.call("/api/studio")).projects.find(p => p.id === id);
 
-  await a.call("/api/publish", { action: "prepare", id, revision: project.revision, language: "en" }, 403);
-  await markWorldIdVerified(author.address);
-  await markWorldIdVerified(buyer.address);
 
   // 5. Encrypt, upload to Arweave (real), sign a quote.
   const started = Date.now();
@@ -197,7 +188,7 @@ try {
   assert.equal(own.pages[2].dialogue, "Secret line 3");
 
   // 10. Buyer gets a purchase certificate and buys.
-  const bc = await b.call("/api/personhood", { step: "certificate", action: "purchase" });
+  const bc = await b.call("/api/market/authorization", { action: "purchase" });
   const buyCert = { wallet: bc.certificate.wallet, action: Number(bc.certificate.action), expiresAt: BigInt(bc.certificate.expiresAt), nonce: BigInt(bc.certificate.nonce) };
   await assert.rejects(send(stranger, "purchase", [publicationId, toHex(randomBytes(32)), buyCert, bc.signature], quote.price), "certificate is bound to the buyer's wallet");
   const buyTx = await send(buyer, "purchase", [publicationId, toHex(randomBytes(32)), buyCert, bc.signature], quote.price);
