@@ -1,3 +1,4 @@
+import type { OriginalityResult } from "./types";
 import { getAddress, isAddress } from "viem";
 export { editionsAbi } from "./editions-abi";
 const raw = process.env.NEXT_PUBLIC_EDITIONS_ADDRESS;
@@ -10,6 +11,7 @@ export async function editionRequest<T>(body?: Record<string, unknown>, query = 
 export type EditionToken = {
   id: string; comicId: string; author: string; supply: number; owner: string; depositor: string; title: string; description: string; genre: string; license: string; cover?: string; uri: string; manifestHash: string; metadataHash: string; delisted: boolean;
   sale: [string, string, string, string, string]; auction: [string, string, string, string, string, string, boolean]; ask: [string, string, string]; minimum: string;
+  originality?: OriginalityResult;
   firstAuction?: { reserveWei: string; duration: number };
   review?: { score: number; reasons: string[]; model: string; provider: string; promptVersion: string; at: string; teeVerified: boolean; uncertainty: string; requestId?: string; verification?: string; assessment?: { completeness: string; legibility: string; pageOrder: string } }; reviewOverride?: { reason: string };
 };

@@ -9,6 +9,8 @@ import { fetchVerified, upload, gatewayUrl } from "./arweave";
 import { screenWith0G, SCREENING_PROMPT_VERSION } from "./zg";
 import { privateKey } from "./env";
 import { confirmedNFT, nftConfig } from "./nft-chain";
+import { assessOriginality } from "./originality";
+import { blankPages } from "./blank-pages";
 
 function owner(db: Database, token: string | undefined, id: unknown) {
   const user = sessionUser(db, token); ensure(user, "Sign in with your wallet.", 401);
@@ -45,6 +47,20 @@ export async function prepareEdition(token: string | undefined, body: Record<str
       return structuredClone(project);
     });
     authorized = true;
+    const blank = await blankPages(snapshot.panels);
+    ensure(blank.length === 0, `Page${blank.length === 1 ? "" : "s"} ${blank.join(", ")} ${blank.length === 1 ? "is" : "are"} blank or a single colour. Add artwork before publishing.`, 409);
+    // Recheck the confirmed catalogue on every submission or permit request, including
+    // drafts uploaded before originality review was introduced.
+    const originality = await assessOriginality(snapshot.panels);
+    await database(db => {
+      const { project } = owner(db, token, projectId);
+      ensure(project.revision === snapshot.revision, "Project changed during originality review. Save and retry.", 409);
+      project.originality = originality;
+    }, true);
+    ensure(originality.maxSimilarity <= 85, "This comic is more than 85% similar to a published comic. NFT publication is blocked; see the comparison below.", 409);
+    const latest = await confirmedNFT();
+    const currentCount = await latest.client.readContract({ address: latest.address, abi: latest.abi, blockNumber: latest.blockNumber, functionName: "comicCount" });
+    ensure(currentCount.toString() === originality.comparedComicCount, "The published catalogue changed during review. Retry.", 409);
     if (!snapshot.edition) {
       const key = newContentKey(); const bundle = buildBundle(snapshot.panels, key);
       const cover = await previewImage(snapshot.panels);
@@ -88,11 +104,14 @@ export async function prepareEdition(token: string | undefined, body: Record<str
 
 async function permitFor(project: Project, cfg: ReturnType<typeof nftConfig>, token?: string) {
   const e = project.edition!;
+  const latest = await confirmedNFT();
+  const currentCount = await latest.client.readContract({ address: latest.address, abi: latest.abi, blockNumber: latest.blockNumber, functionName: "comicCount" });
+  ensure(project.originality && project.originality.maxSimilarity <= 85 && project.originality.comparedComicCount === currentCount.toString(), "Published comics changed since the originality check. Retry review.", 409);
   const blockTime = (await cfg.client.getBlock()).timestamp;
   const now = BigInt(Math.floor(Date.now() / 1000));
   const deadline = (blockTime > now ? blockTime : now) + BigInt(10 * 60);
   if (!e.uri) {
-    const metadata = { name: project.title, description: project.description, image: `ar://${e.coverTxId}`, genre: project.genre, creator: project.members[0].address, editionSupply: e.supply, license: e.license, firstAuction: { reserveWei: e.reserveWei || "10000000000000000", duration: e.auctionDuration || 86400 }, copyright: "Copyright remains with the creators. Reading license follows current ownership.", manifestHash: e.manifestHash, review: e.review, reviewOverride: e.appeal?.decision === "approved" ? { decision: "approved", reason: e.appeal.reason, reviewer: e.appeal.reviewer } : undefined };
+    const metadata = { name: project.title, description: project.description, image: `ar://${e.coverTxId}`, genre: project.genre, creator: project.members[0].address, editionSupply: e.supply, license: e.license, firstAuction: { reserveWei: e.reserveWei || "10000000000000000", duration: e.auctionDuration || 86400 }, copyright: "Copyright remains with the creators. Reading license follows current ownership.", manifestHash: e.manifestHash, review: e.review, originality: project.originality, reviewOverride: e.appeal?.decision === "approved" ? { decision: "approved", reason: e.appeal.reason, reviewer: e.appeal.reviewer } : undefined };
     const bytes = new TextEncoder().encode(JSON.stringify(metadata));
     const tx = await upload(bytes, "application/json", [{ name: "App-Name", value: "ConsentCraft" }, { name: "Type", value: "nft-metadata" }]);
     e.uri = `ar://${tx}`; e.metadataHash = keccak256(bytes);
@@ -158,7 +177,7 @@ export async function nftMetadata(uri: string, hash: Hex) {
   ensure(/^ar:\/\/[a-zA-Z0-9_-]{43}$/.test(uri), "Unsupported metadata reference.");
   const bytes = await fetchVerified(uri.slice(5), hash, { attempts: 1, delayMs: 0 });
   const m = JSON.parse(Buffer.from(bytes).toString("utf8"));
-  return { title: String(m.name).slice(0, 100), description: String(m.description || "").slice(0, 1000), genre: String(m.genre || ""), license: String(m.license || ""), cover: /^ar:\/\/[\w-]{43}$/.test(m.image) ? gatewayUrl(m.image.slice(5)) : undefined, review: m.review, reviewOverride: m.reviewOverride, firstAuction: m.firstAuction };
+  return { title: String(m.name).slice(0, 100), description: String(m.description || "").slice(0, 1000), genre: String(m.genre || ""), license: String(m.license || ""), cover: /^ar:\/\/[\w-]{43}$/.test(m.image) ? gatewayUrl(m.image.slice(5)) : undefined, review: m.review, originality: m.originality, reviewOverride: m.reviewOverride, firstAuction: m.firstAuction };
 }
 export async function editionAppeal(token: string | undefined, body: Record<string, unknown>) {
   const cfg = nftConfig();
