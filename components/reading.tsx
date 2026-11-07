@@ -13,6 +13,8 @@ import { teamApprovalTypes } from "@/lib/reading-permit";
 import type { Project } from "@/lib/types";
 import { editionRequest } from "@/lib/editions-client";
 import { useStudio } from "./studio-provider";
+import { JuryReview } from "./jury-review";
+import { SimilarityFindings } from "./similarity-findings";
 
 const same = (a?: string, b?: string) => !!a && !!b && a.toLowerCase() === b.toLowerCase();
 const eth = (value: string) => `${formatEther(BigInt(value))} ETH`;
@@ -62,6 +64,8 @@ export function ReadingPublish({ project: p, dirty, refresh, onSave, saving = fa
       })}>{busy || "Approve publication"}</button></>}
       {myApproval && r.status !== "published" && <button className="text-button" disabled={!!busy || !readingAddress} onClick={() => run("Confirm approval withdrawal in your wallet…", async () => { await write("revokeApproval", [r.key]); await readingRequest({ action: "withdraw", id: p.id }); })}>Withdraw my approval</button>}
       {!allApproved && r.status !== "published" && <p className="field-hint" role="status">Waiting for every collaborator to approve. Curator submission and publication stay locked until everyone agrees.</p>}
+      {p.originality && <SimilarityFindings result={p.originality}/>}
+      {owner && r.bundleTxId && <JuryReview key={`${p.id}-${p.revision}`} projectId={p.id} dirty={dirty}/>}
       {r.review && <div className="chain-proof"><strong>Curator review · {r.review.score / 100}/100</strong><p>{r.review.reasons.join(" · ")}</p><p>{r.review.uncertainty}</p></div>}
       {owner && ["team-review", "uploaded"].includes(r.status) && <button className="button purple" disabled={!allApproved || !!busy || expired} onClick={() => run("Reviewing comic images…", () => readingRequest({ action: "review", id: p.id }))}>{busy || "Submit approved comic for curator review"}</button>}
       {r.status === "flagged" && <p role="status">The curator flagged this comic. The owner can reopen it for corrections; every collaborator must approve the corrected version.</p>}
@@ -89,7 +93,7 @@ export function ReadingMarket({ comicId, library = false }: { comicId?: string; 
     {!readingAddress ? <section className="surface"><h2>Reading marketplace setup</h2><p>The fixed-price reading contract is being connected.</p><Link className="button" href="/network">View service setup</Link></section> : <>
     <label className="search-field">Search comics<input value={search} onChange={e => setSearch(e.target.value)} placeholder="Find a story…"/></label>
     {library && !signed && <button className="button purple" onClick={openConnectModal}>Sign in to open your library</button>}{(q.error || error) && <p className="form-error" role="alert">{error || errorText(q.error)}</p>}{q.isFetching && !q.data && <p role="status">Opening the library…</p>}
-    <div className="edition-grid">{comics.map(c => <article className="surface edition-card" key={c.id}>{c.cover && <img src={c.cover} alt={`${c.title} cover`} loading="lazy"/>}<h2><Link href={`/readings/${c.id}`}>{c.title}</Link></h2><p>{c.description}</p><p>{c.genre} · {c.readers} {c.readers === "1" ? "reader" : "readers"}</p><strong>{eth(c.priceWei)} · reading access</strong><details><summary>License & contributor shares</summary><p>{c.license}</p>{c.contributors.map(m => <p className="edition-wallet" key={m.address}>{m.address} · {m.share / 100}%</p>)}<p>2.5% platform fee. Copyright remains with the creators. Reading access belongs to the purchasing wallet.</p></details>
+    <div className="edition-grid">{comics.map(c => <article className="surface edition-card" key={c.id}>{c.cover && <img src={c.cover} alt={`${c.title} cover`} loading="lazy"/>}<h2><Link href={`/readings/${c.id}`}>{c.title}</Link></h2><p>{c.description}</p><p>{c.genre} · {c.readers} {c.readers === "1" ? "reader" : "readers"}</p><strong>{eth(c.priceWei)} · reading access</strong>{c.originality && <SimilarityFindings result={c.originality}/>}<details><summary>License & contributor shares</summary><p>{c.license}</p>{c.contributors.map(m => <p className="edition-wallet" key={m.address}>{m.address} · {m.share / 100}%</p>)}<p>2.5% platform fee. Copyright remains with the creators. Reading access belongs to the purchasing wallet.</p></details>
       {signed && c.canRead ? <button className="button purple" onClick={() => setReader(c.id)}>Read comic</button> : c.delisted ? <p>Unavailable for new purchases. Existing readers retain access.</p> : <button className="button purple" disabled={!!busy} onClick={() => {
         if (!signed) { openConnectModal?.(); return; }
         setBusy(c.id); setError(""); void write("buyReading", [BigInt(c.id)], BigInt(c.priceWei)).then(() => q.refetch()).catch(e => setError(errorText(e))).finally(() => setBusy(""));

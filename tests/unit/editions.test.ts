@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { privateKeyToAccount } from "viem/accounts";
 import type { Database } from "@/lib/store";
 import sharp from "sharp";
-const state = vi.hoisted(() => ({ db: {} as Database, bytes: new Map<string, Uint8Array>(), flags: false, fail: false, reads: [] as boolean[], manifest: "0x" as `0x${string}`, reviewer: "", counter: 0, blockOffset: 1000 }));
+const state = vi.hoisted(() => ({ db: {} as Database, bytes: new Map<string, Uint8Array>(), flags: false, fail: false, reads: [] as boolean[], manifest: "0x" as `0x${string}`, reviewer: "", counter: 0, blockOffset: 1000, similarity: 0 }));
 vi.mock("@/lib/store", async original => {
   const actual = await original<typeof import("@/lib/store")>();
   return { ...actual, database: async (work: (db: Database) => unknown) => work(state.db) };
@@ -16,8 +16,10 @@ vi.mock("@/lib/server/zg", () => ({ SCREENING_PROMPT_VERSION: "test-v1", screenW
   if (state.fail) throw new Error("Inference unavailable");
   return { score: 7500, flagged: state.flags, reasons: ["Test review"], model: "test-model", provider: "test-provider", teeVerified: false, at: new Date().toISOString() };
 } }));
+vi.mock("@/lib/server/originality", () => ({ assessOriginality: async () => ({ crux: "A test story", maxSimilarity: state.similarity, comparedComicCount: "0", model: "test", requestId: "test", at: new Date().toISOString(), comparisons: [] }) }));
 vi.mock("@/lib/server/nft-chain", () => {
   const cfg = () => ({ address: `0x${"12".repeat(20)}`, chainId: 31337, confirmations: 0, blockNumber: BigInt(1), client: { readContract: async ({ functionName }: { functionName: string }) => {
+    if (functionName === "comicCount") return BigInt(0);
     if (functionName === "reviewer") return state.reviewer;
     if (functionName === "canRead") return state.reads.shift() ?? false;
     if (functionName === "tokenComic") return BigInt(1);
@@ -31,11 +33,28 @@ describe("edition publishing and ownership-gated pages", () => {
   beforeEach(async () => {
     const key = `0x${"11".repeat(32)}` as const; state.reviewer = privateKeyToAccount(key).address;
     process.env.EDITION_REVIEWER_PRIVATE_KEY = key; process.env.CONTENT_KEY_ENCRYPTION_KEY = key;
-    state.flags = false; state.fail = false; state.reads = []; state.bytes.clear(); state.counter = 0; state.blockOffset = 1000;
-    const image = `data:image/jpeg;base64,${(await sharp({ create: { width: 8, height: 8, channels: 3, background: "red" } }).jpeg().toBuffer()).toString("base64")}`;
+    state.flags = false; state.fail = false; state.reads = []; state.bytes.clear(); state.counter = 0; state.blockOffset = 1000; state.similarity = 0;
+    const pixels = Buffer.from(Array.from({ length: 8 * 8 * 3 }, (_, i) => Math.floor(i / 3) % 2 ? 255 : 0));
+    const image = `data:image/jpeg;base64,${(await sharp(pixels, { raw: { width: 8, height: 8, channels: 3 } }).jpeg().toBuffer()).toString("base64")}`;
     state.db = { users: [{ id: "owner", address: state.reviewer as `0x${string}`, name: "Creator", color: "purple" }], sessions: [{ token: "session", userId: "owner", expires: Date.now() + 100000, auth: "wallet" }], invitations: [], projects: [{ id: "project", ownerId: "owner", title: "Test comic", description: "", genre: "Fantasy", theme: "", terms: "Reading license", revision: 1, version: 0, state: "draft", rosterFrozen: false, approvals: [], events: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), panels: Array.from({ length: 4 }, () => ({ image, dialogue: "Secret dialogue", alt: "Comic panel" })), members: [{ userId: "owner", address: state.reviewer as `0x${string}`, name: "Creator", role: "Artist", share: 10000 }] }] };
   });
   const submit = () => prepareEdition("session", { id: "project", revision: 1, supply: 2, rights: true });
+  it("rejects blank pages before originality review or any upload", async () => {
+    const blank = await sharp({ create: { width: 8, height: 8, channels: 3, background: "white" } }).jpeg().toBuffer();
+    state.db.projects[0].panels[1].image = `data:image/jpeg;base64,${blank.toString("base64")}`;
+    await expect(submit()).rejects.toThrow(/Page 2 is blank/);
+    expect(state.counter).toBe(0);
+    expect(state.db.projects[0].edition).toBeUndefined();
+    expect(state.db.projects[0].originality).toBeUndefined();
+  });
+  it("blocks similarity above 85 before any upload and permits 85", async () => {
+    state.similarity = 86;
+    await expect(submit()).rejects.toThrow(/more than 85%/);
+    expect(state.counter).toBe(0);
+    expect(state.db.projects[0].originality?.maxSimilarity).toBe(86);
+    state.similarity = 85;
+    await expect(submit()).resolves.toBeDefined();
+  });
   it("requires signature login, rights and a valid supply", async () => {
     await expect(prepareEdition(undefined, { id: "project" })).rejects.toThrow(/Sign in/);
     await expect(prepareEdition("session", { id: "project", revision: 1, supply: 2 })).rejects.toThrow(/permission/);

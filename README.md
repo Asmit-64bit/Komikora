@@ -222,3 +222,11 @@ The UI exposes wallet publishing, Arkiv and 0G paths and reports missing configu
 ### AI comic ratings
 
 The separate `ComicRatingRegistry` contract stores comic pointers and immutable AI jury ratings. See [contracts/README.md](contracts/README.md#comic-ratings) for the trust model, Galileo deployment configuration, and typed ABI export.
+
+### Multi-model rating registry
+
+The fixed-price reading review panel can submit a multi-model reading-quality rating to `ComicRatingRegistry` after the encrypted Arweave bundle has been uploaded. Configure `ZG_JURY_MODELS` (2–9 distinct image-capable models), `ZG_COMPUTE_API_KEY`, `JURY_REGISTRY_ADDRESS`, `JURY_REGISTRY_RPC_URL`, `JURY_REGISTRY_CHAIN_ID`, `JURY_RELAYER_PRIVATE_KEY`, and public HTTPS `APP_ORIGIN`. Fund the relayer and grant it `RELAYER_ROLE`; the model count must satisfy the registry minimum. Inference and transactions incur costs.
+
+Register the comic on the registry first, using the manifest hash and Arweave bundle ID shown under **Get comic registration details**, together with its real Arkiv entity key. Enter the emitted registry comic ID and an unused rubric version in the review panel. The server checks the on-chain hash and pointer against the verified Arweave bundle before sending the pages to the jury. This quality rating is separate from the originality check.
+
+Evidence is a relayer-signed JSON bundle available from this app's database-backed evidence endpoint. Provider checks are gateway-reported, not independently verified model signatures or hardware quotes. The registry itself does not verify attestations. Keep the database and public origin available. A pending or uncertain transaction is not retried automatically; inspect the chain before resolving its stored job. Use a single active worker with durable PostgreSQL storage: the local-file store and in-process lock cannot coordinate multiple processes. This does not deploy a registry or create its Arweave and Arkiv records.

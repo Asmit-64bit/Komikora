@@ -4,12 +4,12 @@ import { envValue, NotConfiguredError } from "./env";
 
 export function privateComputerConfigured() { return !!envValue("ZG_COMPUTE_API_KEY"); }
 export const DEFAULT_PRIVATE_MODEL = "0gm-1.0-35b-a3b";
-export async function privateCompletion(messages: { role: "system" | "user"; content: string | unknown[] }[], maxTokens = 1200) {
+export async function privateCompletion(messages: { role: "system" | "user"; content: string | unknown[] }[], maxTokens = 1200, modelOverride?: string) {
   const key = envValue("ZG_COMPUTE_API_KEY");
   if (!key) throw new NotConfiguredError("0G Private Computer", ["ZG_COMPUTE_API_KEY"]);
   const base = new URL(envValue("ZG_COMPUTE_BASE_URL") || "https://router-api.0g.ai/v1");
   ensure(base.protocol === "https:" && !base.username && !base.password, "Use a secure 0G endpoint.", 503);
-  const model = envValue("ZG_COMPUTE_MODEL") || DEFAULT_PRIVATE_MODEL;
+  const model = modelOverride || envValue("ZG_COMPUTE_MODEL") || DEFAULT_PRIVATE_MODEL;
   const trust = envValue("ZG_COMPUTE_TRUST_MODE") || "private";
   ensure(trust === "private", "Comic review requires private 0G routing. Set ZG_COMPUTE_TRUST_MODE=private.", 503);
   const response = await fetch(`${base.href.replace(/\/$/, "")}/chat/completions`, {
@@ -39,6 +39,6 @@ export async function privateCompletion(messages: { role: "system" | "user"; con
   "0G did not confirm the provider's attestation, signer and measurements. The score was not accepted.", 502);
   const usage = body.usage;
   ensure(Number.isSafeInteger(usage?.prompt_tokens) && usage!.prompt_tokens! >= 0 && Number.isSafeInteger(usage?.completion_tokens) && usage!.completion_tokens! >= 0, "0G returned no valid token usage. The result was not accepted.", 502);
-  return { content, requestId, model: body.model || model, inputTokens: body.usage?.prompt_tokens || 0, outputTokens: body.usage?.completion_tokens || 0,
+  return { content, requestId, model: body.model || model, reportedModel: body.model, inputTokens: body.usage?.prompt_tokens || 0, outputTokens: body.usage?.completion_tokens || 0,
     routerVerified: true, provider, evidence: { verification: "gateway-reported" as const, verdicts: evidence!.verdicts!, osImage: evidence!.os_image, composeHash: evidence!.compose_hash }, at: new Date().toISOString() };
 }

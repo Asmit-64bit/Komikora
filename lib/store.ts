@@ -16,6 +16,8 @@ export type Database = {
   users: Account[];
   sessions: { token: string; userId: string; expires: number; auth?: "wallet" }[];
   projects: Project[];
+  juryEvidence?: Record<string, string>;
+  juryJobs?: Record<string, { status: "pending" | "submitted" | "failed"; transactionHash?: string }>;
   invitations: (Invitation | LegacyInvitation)[];
   walletChallenges?: WalletChallenge[];
   /** Server-only publishing secrets, keyed by project id. Never returned to clients. */

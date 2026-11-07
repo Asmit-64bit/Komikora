@@ -5,7 +5,7 @@ import sharp from "sharp";
 import type { Database } from "@/lib/store";
 import type { Project } from "@/lib/types";
 import { readingPermitTypes } from "@/lib/reading-permit";
-const state = vi.hoisted(() => ({ db: {} as Database, queue: Promise.resolve() as Promise<unknown>, blobs: new Map<string, Uint8Array>(), uploads: 0, reviews: 0, fail: false, flagged: false, reviewer: "", revoked: new Set<string>(), canRead: new Set<string>(), published: false, hold: undefined as undefined | Promise<void> }));
+const state = vi.hoisted(() => ({ db: {} as Database, queue: Promise.resolve() as Promise<unknown>, blobs: new Map<string, Uint8Array>(), uploads: 0, reviews: 0, fail: false, flagged: false, reviewer: "", revoked: new Set<string>(), canRead: new Set<string>(), published: false, similarity: 0, hold: undefined as undefined | Promise<void> }));
 vi.mock("@/lib/store", async original => ({ ...await original<typeof import("@/lib/store")>(), database: async (work: (db: Database) => unknown) => { const next = state.queue.catch(() => {}).then(() => work(state.db)); state.queue = next; return next; } }));
 vi.mock("@/lib/server/arweave", () => ({
   upload: async (bytes: Uint8Array) => { const key = String(++state.uploads).padStart(43, "a"); state.blobs.set(key, bytes); return key; },
@@ -13,11 +13,13 @@ vi.mock("@/lib/server/arweave", () => ({
   gatewayUrl: (key: string) => `https://example.test/${key}`,
 }));
 vi.mock("@/lib/server/zg", () => ({ SCREENING_PROMPT_VERSION: "test-v1", screenWith0G: async () => { state.reviews++; if (state.hold) await state.hold; if (state.fail) throw new Error("Inference unavailable"); return { score: 8000, flagged: state.flagged, reasons: ["Fixture"], model: "fixture", provider: "fixture", teeVerified: false, at: new Date().toISOString() }; } }));
+vi.mock("@/lib/server/originality", () => ({ assessOriginality: async () => ({ crux: "A story", maxSimilarity: state.similarity, comparedComicCount: "0", model: "test", requestId: "test", at: new Date().toISOString(), comparisons: [] }) }));
 vi.mock("@/lib/server/reading-chain", () => {
   const cfg = () => ({ address: `0x${"12".repeat(20)}`, chainId: 31337, confirmations: 0, blockNumber: BigInt(42), client: {
     getBlock: async () => ({ timestamp: BigInt(Math.floor(Date.now() / 1000)) }),
     readContract: async ({ functionName, args }: { functionName: string; args?: string[] }) => {
       if (functionName === "revokedApprovals") return state.revoked.has(args![0].toLowerCase());
+      if (functionName === "comicCount") return BigInt(0);
       if (functionName === "reviewer") return state.reviewer;
       if (functionName === "canRead") return state.canRead.has(args![1].toLowerCase());
       if (functionName === "comicForKey") return BigInt(state.published ? 1 : 0);
@@ -32,8 +34,9 @@ const reviewerKey = generatePrivateKey(); const reviewer = privateKeyToAccount(r
 const project = () => state.db.projects[0];
 beforeEach(async () => {
   vi.stubEnv("EDITION_REVIEWER_PRIVATE_KEY", reviewerKey); vi.stubEnv("CONTENT_KEY_ENCRYPTION_KEY", `0x${"44".repeat(32)}`);
-  state.queue = Promise.resolve(); state.blobs.clear(); state.uploads = 0; state.reviews = 0; state.fail = false; state.flagged = false; state.hold = undefined; state.revoked.clear(); state.canRead.clear(); state.published = false; state.reviewer = reviewer.address;
-  const image = `data:image/jpeg;base64,${(await sharp({ create: { width: 16, height: 16, channels: 3, background: "red" } }).jpeg().toBuffer()).toString("base64")}`;
+  state.queue = Promise.resolve(); state.blobs.clear(); state.uploads = 0; state.reviews = 0; state.fail = false; state.flagged = false; state.hold = undefined; state.revoked.clear(); state.canRead.clear(); state.published = false; state.similarity = 0; state.reviewer = reviewer.address;
+  const pixels = Buffer.from(Array.from({ length: 16 * 16 * 3 }, (_, i) => Math.floor(i / 3) % 2 ? 255 : 0));
+  const image = `data:image/jpeg;base64,${(await sharp(pixels, { raw: { width: 16, height: 16, channels: 3 } }).jpeg().toBuffer()).toString("base64")}`;
   const p: Project = { id: "comic", title: "Shared story", description: "Fixture", genre: "Original", theme: "", ownerId: "author", members: [{ userId: "author", name: "Author", address: author.address, role: "Writer", share: 6000 }, { userId: "collaborator", name: "Collaborator", address: collaborator.address, role: "Artist", share: 4000 }], panels: [{ image, dialogue: "Hello", alt: "Fixture" }], state: "draft", revision: 1, version: 0, approvals: [], terms: "Read with your purchased wallet access.", rosterFrozen: false, priceWei: "1000", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), events: [] };
   state.db = { users: [{ id: "author", name: "Author", color: "purple", address: author.address }, { id: "collaborator", name: "Collaborator", color: "purple", address: collaborator.address }, { id: "outsider", name: "Outsider", color: "purple", address: outsider.address }], sessions: ["author", "collaborator", "outsider"].map(userId => ({ token: userId, userId, expires: Date.now() + 86400000, auth: "wallet" })), projects: [p], invitations: [] };
 });
@@ -44,6 +47,16 @@ async function approve(token: "author" | "collaborator", wallet = token === "aut
 }
 async function allAgree() { await startTeamReview("author", { id: "comic", revision: 1 }); await approve("author"); await approve("collaborator"); }
 describe("collaborator publication approvals", () => {
+  it("blocks blank and highly similar comics before storage upload", async () => {
+    const blank = await sharp({ create: { width: 16, height: 16, channels: 3, background: "white" } }).jpeg().toBuffer();
+    project().panels[0].image = `data:image/jpeg;base64,${blank.toString("base64")}`;
+    await allAgree(); await expect(curateReading("author", "comic")).rejects.toThrow(/blank/); expect(state.uploads).toBe(0);
+    await reopenReading("author", "comic");
+    const pixels = Buffer.from(Array.from({ length: 16 * 16 * 3 }, (_, n) => Math.floor(n / 3) % 2 ? 255 : 0));
+    project().panels[0].image = `data:image/jpeg;base64,${(await sharp(pixels, { raw: { width: 16, height: 16, channels: 3 } }).jpeg().toBuffer()).toString("base64")}`;
+    await startTeamReview("author", { id: "comic", revision: project().revision }); await approve("author"); await approve("collaborator");
+    state.similarity = 86; await expect(curateReading("author", "comic")).rejects.toThrow(/85%/); expect(state.uploads).toBe(0);
+  });
   it("requires owner, saved content, fixed price and resolved invitations before freezing", async () => {
     await expect(startTeamReview("collaborator", { id: "comic", revision: 1 })).rejects.toMatchObject({ status: 403 });
     await expect(startTeamReview("author", { id: "comic", revision: 0 })).rejects.toThrow(/Save your latest/);

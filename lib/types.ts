@@ -1,6 +1,7 @@
 export type User = { id: string; name: string; color: string; address: `0x${string}`; username?: string };
 export type Member = { userId: string; name: string; role: string; share: number; address?: string };
 export type Panel = { image: string; dialogue: string; alt: string };
+export type OriginalityResult = { crux: string; maxSimilarity: number; comparedComicCount: string; model: string; requestId: string; at: string; comparisons: { comicId: string; title: string; similarity: number; relevance: string }[] };
 export type Project = {
   id: string; title: string; description: string; ownerId: string; theme: string;
   genre: string; members: Member[]; panels: Panel[]; state: "draft" | "review" | "published";
@@ -14,6 +15,7 @@ export type Project = {
   publication?: PublicationView;
   edition?: EditionPublication;
   reading?: ReadingPublication;
+  originality?: OriginalityResult;
 };
 export type ReadingPublication = {
   key: `0x${string}`; contentHash: `0x${string}`; licenseHash: `0x${string}`; contributorsHash: `0x${string}`;
