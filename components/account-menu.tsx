@@ -8,7 +8,7 @@ import { studioRequest, useStudio } from "./studio-provider";
 import { Icon } from "./icons";
 import { cleanUsername, usernameProblem, USERNAME_MAX, USERNAME_RULES } from "@/lib/username";
 
-const PROMPT_KEY = "consentcraft:username-prompt-dismissed";
+const PROMPT_KEY = "createio:username-prompt-dismissed";
 const short = (address: string) => `${address.slice(0, 6)}…${address.slice(-4)}`;
 const hue = (address: string) => parseInt(address.slice(2, 8), 16) % 360;
 

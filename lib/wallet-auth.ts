@@ -47,7 +47,7 @@ export async function walletAuth(req: NextRequest, body: Record<string, unknown>
     const message = createSiweMessage({
       address, chainId: Number(body.chainId), domain: new URL(origin).host, uri: origin,
       version: "1", nonce: id(), issuedAt: new Date(now), expirationTime: new Date(expires),
-      statement: "Sign in to ConsentCraft. This message does not authorize transactions or cost gas.",
+      statement: "Sign in to Create.io. This message does not authorize transactions or cost gas.",
     });
     db.walletChallenges.push({ id: challengeId, address, message, origin, expires });
     const response = json({ message });

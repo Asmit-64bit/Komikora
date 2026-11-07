@@ -51,7 +51,7 @@ export function RainbowStudioProvider({ children }: { children: React.ReactNode 
     signOut: () => clearSession().catch(() => {}),
   }), [config, execute, clearSession]);
   return <RainbowKitAuthenticationProvider adapter={adapter} status={loading ? "loading" : data.user ? "authenticated" : "unauthenticated"}>
-    <RainbowKitProvider modalSize="compact" appInfo={{ appName: "ConsentCraft" }} theme={walletTheme}>
+    <RainbowKitProvider modalSize="compact" appInfo={{ appName: "Create.io" }} theme={walletTheme}>
       {children}
       {authError && <div className="toast" role="alert" style={{ zIndex: 2147483647 }}><span>{authError}</span><button className="icon-button" aria-label="Dismiss sign-in error" onClick={() => setAuthError("")}>×</button></div>}
     </RainbowKitProvider>

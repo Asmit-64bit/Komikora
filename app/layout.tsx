@@ -12,7 +12,7 @@ const inter = Inter({ subsets: ["latin"], style: ["normal", "italic"], variable:
 const playfair = Playfair_Display({ subsets: ["latin"], style: ["normal", "italic"], variable: "--font-playfair", display: "swap" });
 
 export const metadata: Metadata = {
-  title: "ConsentCraft — Good stories, made together",
+  title: "Create.io — Good stories, made together",
   description: "A shared studio for comics. Create with your people, give everyone a voice, and make something together.",
 };
 
