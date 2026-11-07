@@ -17,8 +17,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       ? [rainbowWallet, metaMaskWallet, rabbyWallet, walletConnectWallet, injectedWallet]
       : [injectedWallet, rabbyWallet],
     }], {
-      appName: "Create.io",
-      appDescription: "Create, collect and read comic NFT editions with Create.io.",
+      appName: "Komikora",
+      appDescription: "Create, collect and read comic NFT editions with Komikora.",
       // Use the page's actual origin, including preview deployments. A copied
       // localhost/canonical env URL must not identify a different site to wallets.
       // RainbowKit also defaults appUrl to this origin when running in a browser.
