@@ -23,6 +23,8 @@
     "abi:editions": "node ../node_modules/hardhat/dist/src/cli.js run scripts/export-editions.ts",
     "deploy:editions:local": "node --env-file-if-exists=.env ../node_modules/hardhat/dist/src/cli.js run --network localhost scripts/deploy-editions.ts",
     "deploy:editions:sepolia": "node --env-file-if-exists=.env ../node_modules/hardhat/dist/src/cli.js run --network sepolia scripts/deploy-editions.ts",
-    "deploy:registry:galileo": "node --env-file-if-exists=.env ../node_modules/hardhat/dist/src/cli.js run --network ogGalileo scripts/deploy-registry.ts"
+    "deploy:registry:galileo": "node --env-file-if-exists=.env ../node_modules/hardhat/dist/src/cli.js run --network ogGalileo scripts/deploy-registry.ts",
+    "abi:reading": "node ../node_modules/hardhat/dist/src/cli.js run scripts/export-reading.ts",
+    "deploy:reading:sepolia": "node --env-file-if-exists=.env ../node_modules/hardhat/dist/src/cli.js run --network sepolia scripts/deploy-reading.ts"
   }
 }

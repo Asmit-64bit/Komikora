@@ -45,6 +45,7 @@ test("PDF and EPUB imports render pages and survive saving and reload", async ({
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("button", { name: /^Test Wallet(?: Recent)?$/ }).click();
   await dialog.getByRole("button", { name: "Sign message", exact: true }).click();
+  await page.getByRole("dialog", { name: "Choose a username" }).getByRole("button", { name: "Maybe later" }).click();
   await expect(dialog).not.toBeVisible();
   const main = page.locator("main:visible");
   await main.getByRole("button", { name: "New project", exact: true }).click();

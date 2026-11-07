@@ -23,21 +23,18 @@ test("service pages load without identity setup and private actions require a se
   const denied = await request.post("/api/recommendations", { data: { interests: "fantasy" }, headers: { Origin: "http://127.0.0.1:3100" } }); expect(denied.status()).toBe(401);
   expect(errors).toEqual([]);
 });
-test("NFT marketplace and trade routes remain usable on desktop and mobile", async ({ page }, info) => {
+test("fixed-price marketplace and reading library work on desktop and mobile", async ({ page }, info) => {
   const errors: string[] = []; page.on("pageerror", e => errors.push(e.message));
   await page.goto("/marketplace"); const main = page.locator("main:visible");
-  await expect(main.getByRole("heading", { name: "The marketplace.", exact: true })).toBeVisible();
-  await expect(main.getByText(/NFT editions have not launched/).or(main.getByRole("tab", { name: "First-sale auctions", exact: true }))).toBeVisible();
-  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Trade (locked)", exact: true }).click();
-  await expect(main.getByRole("heading", { name: "Trade is locked.", exact: true })).toBeVisible();
-  await expect(main.getByRole("link", { name: "Explore Marketplace →" })).toHaveAttribute("href", "/marketplace");
-  await expect(main.getByRole("tab", { name: "First-sale auctions" })).toHaveCount(0);
-  await expect(main.getByRole("tab", { name: "Resales" })).toHaveCount(0);
-  await page.reload();
-  await expect(main.getByRole("heading", { name: "Trade is locked.", exact: true })).toBeVisible();
-  await page.screenshot({ path: info.outputPath("trade-desktop.png"), fullPage: true });
+  await expect(main.getByRole("heading", { name: "The comic library.", exact: true })).toBeVisible();
+  await expect(main).toContainText("fixed price");
+  await expect(main.getByRole("tab", { name: /auction|resale/i })).toHaveCount(0);
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Library", exact: true }).click();
+  await expect(main.getByRole("heading", { name: "Your reading library.", exact: true })).toBeVisible();
+  await expect(main).not.toContainText(/trade is locked|bid on|auction/i);
+  await page.screenshot({ path: info.outputPath("library-desktop.png"), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({ path: info.outputPath("trade-mobile.png"), fullPage: true });
+  await page.screenshot({ path: info.outputPath("library-mobile.png"), fullPage: true });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   expect(errors).toEqual([]);
 });

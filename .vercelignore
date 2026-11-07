@@ -15,5 +15,6 @@ contracts/cache
 contracts/coverage
 contracts/deployments/localhost.json
 contracts/deployments/editions-localhost.json
+contracts/deployments/reading-localhost.json
 contracts/deployments/hardhat*.json
 indexer/.state

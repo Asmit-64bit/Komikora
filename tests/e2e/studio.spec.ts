@@ -21,6 +21,9 @@ test("accounts, saved artwork, invitations, collaboration, and conflict recovery
     await expect(connect.or(dialog.getByRole("button", { name: "Sign message", exact: true }))).toBeVisible();
     if (await connect.isVisible()) await connect.click();
     await dialog.getByRole("button", { name: "Sign message", exact: true }).click();
+    await expect(target.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
+    const username = target.getByRole("dialog", { name: "Choose a username" });
+    if (await username.isVisible()) await username.getByRole("button", { name: "Maybe later" }).click();
     await expect(dialog).not.toBeVisible();
   }
 
@@ -47,7 +50,7 @@ test("accounts, saved artwork, invitations, collaboration, and conflict recovery
   await expect(main(page).locator(".upload-area img")).toHaveAttribute("src", /^data:image\/jpeg;base64,/);
 
   await main(page).getByRole("tab", { name: "Team & shares" }).click();
-  await main(page).getByLabel("Collaborator wallet address", { exact: true }).fill(collaboratorWallet.address);
+  await main(page).getByLabel("Collaborator username or wallet address", { exact: true }).fill(collaboratorWallet.address);
   await main(page).getByRole("button", { name: "Create invite", exact: true }).click();
   const invitationInput = main(page).getByLabel("Invitation link");
   await expect(invitationInput).toHaveValue(/\/invites\//);
@@ -87,13 +90,13 @@ test("accounts, saved artwork, invitations, collaboration, and conflict recovery
     await main(page).getByRole("spinbutton", { name: `Share for ${shortAddress(collaboratorWallet.address)} %`, exact: true }).fill("40");
     await main(page).getByRole("button", { name: "Save changes", exact: true }).click();
     await expect(main(page).getByRole("button", { name: "All changes saved" })).toBeDisabled();
-    await main(page).getByLabel("Collaborator wallet address", { exact: true }).fill(otherWallet.address);
+    await main(page).getByLabel("Collaborator username or wallet address", { exact: true }).fill(otherWallet.address);
     await main(page).getByRole("button", { name: "Create invite", exact: true }).click();
     await expect(main(page).locator(".pending-invite")).toHaveCount(1);
     await main(page).locator(".pending-invite").getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(main(page).locator(".pending-invite")).toHaveCount(0);
     await expect(main(page).getByLabel("Invitation link")).toHaveCount(0);
-    await main(page).getByLabel("Collaborator wallet address", { exact: true }).click();
+    await main(page).getByLabel("Collaborator username or wallet address", { exact: true }).click();
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.screenshot({ path: testInfo.outputPath("studio-team-desktop.png"), fullPage: true });
 
@@ -112,7 +115,7 @@ test("accounts, saved artwork, invitations, collaboration, and conflict recovery
     await page.evaluate(address => (window as unknown as WalletTestWindow).walletTest.switchAccount(address), otherWallet.address);
     await expect(main(page).getByRole("heading", { name: "Your studio is waiting" })).toBeVisible();
     await expect.poll(async () => (await (await page.request.get("/api/studio")).json()).user).toBeNull();
-    await page.getByRole("button", { name: "Connect wallet", exact: true }).click();
+    await page.locator(".topbar").getByRole("button", { name: "Sign in", exact: true }).click();
     await signin(page);
     await expect(main(page).getByRole("heading", { name: "This draft is not here" })).toBeVisible();
     await page.evaluate(() => (window as unknown as WalletTestWindow).walletTest.disconnect());

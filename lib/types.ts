@@ -13,6 +13,16 @@ export type Project = {
   publicationId?: string;
   publication?: PublicationView;
   edition?: EditionPublication;
+  reading?: ReadingPublication;
+};
+export type ReadingPublication = {
+  key: `0x${string}`; contentHash: `0x${string}`; licenseHash: `0x${string}`; contributorsHash: `0x${string}`;
+  priceWei: string; approvalDeadline: number; chainId: number; contract: `0x${string}`;
+  status: "team-review" | "uploaded" | "flagged" | "approved" | "published";
+  approvals: { userId: string; address: `0x${string}`; signature: `0x${string}`; at: string }[];
+  manifestHash?: `0x${string}`; bundleTxId?: string; coverTxId?: string;
+  uri?: string; metadataHash?: `0x${string}`; comicId?: string; permitExpiresAt?: number;
+  review?: EditionPublication["review"]; error?: string;
 };
 export type EditionPublication = {
   key: `0x${string}`; manifestHash: `0x${string}`; bundleTxId: string; coverTxId: string;

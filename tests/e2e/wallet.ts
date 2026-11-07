@@ -9,10 +9,16 @@ export async function installWallet(page: Page, wallets: PrivateKeyAccount[]) {
     if (!wallet) throw new Error("Unknown test wallet");
     return wallet.signMessage({ message: { raw: message } });
   });
+  await page.exposeFunction("signTestWalletTypedData", async (address: string, payload: string) => {
+    const wallet = wallets.find(wallet => wallet.address.toLowerCase() === address.toLowerCase());
+    if (!wallet) throw new Error("Unknown test wallet");
+    return wallet.signTypedData(JSON.parse(payload));
+  });
   await page.addInitScript(({ address }) => {
     let selected: string = address;
     let authorized = sessionStorage.getItem("test-wallet-authorized") === "yes";
     let rejectNext = false;
+    let chainId = "0x1";
     const requests: { method: string; params: unknown[] }[] = [];
     const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
     const emit = (event: string, value: unknown) => listeners.get(event)?.forEach(callback => callback(value));
@@ -24,8 +30,12 @@ export async function installWallet(page: Page, wallets: PrivateKeyAccount[]) {
       removeListener(event: string, callback: (...args: unknown[]) => void) { listeners.get(event)?.delete(callback); },
       async request({ method, params = [] }: { method: string; params?: unknown[] }) {
         requests.push({ method, params });
-        if (method === "eth_chainId") return "0x1";
-        if (method === "net_version") return "1";
+        if (method === "eth_chainId") return chainId;
+        if (method === "net_version") return String(parseInt(chainId, 16));
+        if (method === "wallet_switchEthereumChain") {
+          chainId = String((params[0] as { chainId: string }).chainId);
+          emit("chainChanged", chainId); return null;
+        }
         if (method === "eth_accounts") return authorized ? [selected] : [];
         if (method === "eth_requestAccounts" || method === "wallet_requestPermissions") {
           authorized = true; sessionStorage.setItem("test-wallet-authorized", "yes");
@@ -38,6 +48,7 @@ export async function installWallet(page: Page, wallets: PrivateKeyAccount[]) {
           if (rejectNext) { rejectNext = false; throw Object.assign(new Error("User rejected request"), { code: 4001 }); }
           return (window as unknown as { signTestWalletMessage: (address: string, message: string) => Promise<string> }).signTestWalletMessage(String(params[1]), String(params[0]));
         }
+        if (method === "eth_signTypedData_v4") return (window as unknown as { signTestWalletTypedData: (address: string, payload: string) => Promise<string> }).signTestWalletTypedData(String(params[0]), String(params[1]));
         throw Object.assign(new Error(`Unsupported wallet method ${method}`), { code: 4200 });
       },
     };

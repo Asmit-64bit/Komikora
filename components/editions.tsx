@@ -139,6 +139,23 @@ function EditionReader({ token, close }: { token: string; close: () => void }) {
   return <div className="edition-reader" role="dialog" aria-modal="true" aria-label="Edition reader"><div className="surface"><button className="button" onClick={close}>Close reader</button><p>Access follows confirmed ownership. Checked every 15 seconds; displayed pages expire after 20 seconds without a successful check. Previously downloaded content cannot be recalled.</p>{error && <p role="alert">{error}</p>}{pages.map((p, i) => <figure key={i}><img src={p.image} alt={p.alt || `Page ${i + 1}`}/><figcaption>{p.dialogue}</figcaption></figure>)}</div></div>;
 }
 
+// Historical immutable contracts may still hold purchased editions, pending
+// bids or escrow. Keep reading and exit operations without offering new sales.
+export function LegacyEditionAccess({ tokenId }: { tokenId?: string }) {
+  const { data: studio } = useStudio(); const { address } = useAccount(); const write = useNftWrite();
+  const [reader, setReader] = useState<string>(); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
+  const signed = same(address, studio.user?.address);
+  const q = useQuery({ queryKey: ["editions", "historical", address, tokenId], queryFn: () => editionRequest<EditionSnapshot>(undefined, `?view=${tokenId ? "token" : "collection"}&page=0${tokenId ? `&id=${tokenId}` : ""}&wallet=${address}`), enabled: !!editionsAddress && !!address && signed, refetchInterval: 15000 });
+  async function run(name: string, args: readonly unknown[]) { setBusy(true); setError(""); try { await write(name, args); await q.refetch(); } catch (e) { setError(errorText(e)); } finally { setBusy(false); } }
+  const tokens = (q.data?.tokens || []).filter(t => tokenId || same(t.owner, address) || same(t.depositor, address) || same(t.auction[1], address));
+  return <><div className="page-heading"><div><h1>Earlier editions.</h1><p>New comics use fixed-price reading access. Existing editions and escrow on the earlier contract are preserved.</p></div></div><section className="surface"><p>Sign in with the wallet that owns an earlier edition, placed a bid, or has withdrawable credit.</p><Link className="button" href="/marketplace">Open fixed-price Marketplace</Link><strong>Earlier contract credit: {eth(q.data?.credit || "0")}</strong><button className="button" disabled={!signed || busy || !q.data || q.data.credit === "0"} onClick={() => run("withdraw", [address])}>Withdraw earlier contract credit</button></section>
+    {(error || q.error) && <p role="alert">{error || errorText(q.error)}</p>}<div className="edition-grid">{tokens.map(t => <article className="surface edition-card" key={t.id}>{t.cover && <img src={t.cover} alt={`${t.title} cover`}/>}<h2>{t.title} · earlier edition #{t.id}</h2><p>{t.auction[6] ? `Earlier auction ends ${when(t.auction[4])}. Existing bids stay governed by that contract.` : "Earlier edition record"}</p>
+      {signed && Number(t.sale[0]) > 0 && (same(t.owner, address) || same(t.depositor, address)) && <button className="button purple" onClick={() => setReader(t.id)}>Read purchased edition</button>}
+      {t.auction[6] && <><button className="button" disabled={!signed || busy || Number(q.data?.timestamp || 0) < Number(t.auction[4])} onClick={() => run("settleAuction", [BigInt(t.id)])}>Settle existing auction after its end</button>{same(t.auction[0], address) && t.auction[3] === "0" && <button className="button" disabled={busy} onClick={() => run("cancelAuction", [BigInt(t.id)])}>Cancel existing auction</button>}</>}
+      {same(t.ask[0], address) && t.ask[1] !== "0" && <button className="button" disabled={busy} onClick={() => run("cancelAsk", [BigInt(t.id)])}>Cancel earlier asking price</button>}
+    </article>)}</div>{reader && signed && <EditionReader key={`${reader}-${studio.user?.id}-${address}`} token={reader} close={() => setReader(undefined)}/>}</>;
+}
+
 export function EditionEarnings() {
   const { data } = useStudio(); const { address } = useAccount(); const write = useNftWrite(); const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
   const q = useQuery({ queryKey: ["editions", "credits", address], queryFn: () => editionRequest<EditionSnapshot>(undefined, `?view=collection&wallet=${address}`), enabled: !!address && !!editionsAddress, refetchInterval: 15000 });

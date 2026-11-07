@@ -1,0 +1,27 @@
+import { network } from "hardhat";
+import { encodeDeployData, getAddress, isAddress, keccak256 } from "viem";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+const { viem } = await network.create();
+const client = await viem.getPublicClient(); const chainId = await client.getChainId();
+if (![31337, 11155111].includes(chainId)) throw new Error("Use localhost or Sepolia.");
+const signer = process.env.EDITION_REVIEWER_ADDRESS; const treasury = process.env.EDITION_TREASURY_ADDRESS;
+if (!signer || !treasury || !isAddress(signer) || !isAddress(treasury)) throw new Error("Set the existing project reviewer and treasury addresses.");
+const out = resolve("deployments", `reading-${chainId === 31337 ? "localhost" : "sepolia"}.json`);
+if (existsSync(out)) throw new Error("A reading deployment already exists. Verify and reuse it instead of deploying twice.");
+const [wallet] = await viem.getWalletClients();
+const artifact = JSON.parse(readFileSync("artifacts/contracts/ConsentCraftReading.sol/ConsentCraftReading.json", "utf8"));
+const gas = await client.estimateGas({ account: wallet.account.address, data: encodeDeployData({ abi: artifact.abi, bytecode: artifact.bytecode, args: [getAddress(signer), getAddress(treasury)] }) });
+const gasLimit = (gas * 12n + 9n) / 10n; const fees = await client.estimateFeesPerGas(); const fee = fees.maxFeePerGas || await client.getGasPrice();
+if (await client.getBalance({ address: wallet.account.address }) < gasLimit * fee) throw new Error("Deployment wallet needs more Sepolia test ETH.");
+console.log(JSON.stringify({ chainId, deployer: wallet.account.address, reviewer: getAddress(signer), treasury: getAddress(treasury), estimatedGas: gas.toString(), gasLimit: gasLimit.toString(), maxCostWei: (gasLimit * fee).toString(), bytecodeHash: keccak256(artifact.bytecode) }));
+if (process.env.DEPLOY_PREFLIGHT === "1") { console.log("Preflight passed. No transaction sent."); process.exit(0); }
+const { contract: deployed, deploymentTransaction } = await viem.sendDeploymentTransaction("ConsentCraftReading", [getAddress(signer), getAddress(treasury)], { gas: gasLimit, maxFeePerGas: fee, maxPriorityFeePerGas: fees.maxPriorityFeePerGas || 0n });
+console.log(`Submitted ${deploymentTransaction.hash}`);
+writeFileSync(resolve("../.data/reading-pending.json"), JSON.stringify({ chainId, transactionHash: deploymentTransaction.hash, address: deployed.address }) + "\n");
+const receipt = await client.waitForTransactionReceipt({ hash: deploymentTransaction.hash, confirmations: chainId === 31337 ? 1 : 3 });
+if (receipt.status !== "success") throw new Error("Deployment reverted.");
+const code = await client.getCode({ address: deployed.address }); if (!code || code === "0x") throw new Error("Deployment code unavailable.");
+mkdirSync("deployments", { recursive: true });
+writeFileSync(out, JSON.stringify({ chainId, address: deployed.address, transactionHash: receipt.transactionHash, startBlock: receipt.blockNumber.toString(), reviewer: getAddress(signer), treasury: getAddress(treasury), runtimeCodeHash: keccak256(code), bytecodeHash: keccak256(artifact.bytecode), constructorArguments: [getAddress(signer), getAddress(treasury)] }, null, 2) + "\n");
+console.log(`Reading contract: ${deployed.address}\nConfirmed block: ${receipt.blockNumber}`);

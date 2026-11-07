@@ -1,8 +1,8 @@
 import "server-only";
 import { createPublicClient, http, isAddress, keccak256, toHex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { editionsAbi } from "@/lib/editions-abi";
-import { editionPermitTypes } from "@/lib/edition-permit";
+import { readingAbi } from "@/lib/reading-abi";
+import { readingPermitTypes, teamApprovalTypes } from "@/lib/reading-permit";
 import { envValue, hasKey } from "./env";
 import { DEFAULT_PRIVATE_MODEL } from "./private-computer";
 import { postgresConfigurationError } from "./postgres-store";
@@ -23,24 +23,25 @@ export async function integrationReadiness(probe = false): Promise<ServiceReadin
   rows.push({ name: "Studio sessions and data", status: storageStatus, detail: storageDetail, fields: storageDriver === "postgres" && !sqlConfigured ? ["STUDIO_DATABASE_URL"] : [] });
   const missing = (fields: string[]) => fields.filter(f => !envValue(f));
   const rpc = envValue("CHAIN_RPC_URL") || envValue("NEXT_PUBLIC_RPC_URL");
-  const address = envValue("NEXT_PUBLIC_EDITIONS_ADDRESS"); const chainId = Number(envValue("NEXT_PUBLIC_CHAIN_ID"));
-  const chainFields = missing(["NEXT_PUBLIC_CHAIN_ID", "NEXT_PUBLIC_EDITIONS_ADDRESS"]); if (!rpc) chainFields.push("CHAIN_RPC_URL");
+  const address = envValue("NEXT_PUBLIC_READING_ADDRESS"); const chainId = Number(envValue("NEXT_PUBLIC_CHAIN_ID"));
+  const chainFields = missing(["NEXT_PUBLIC_CHAIN_ID", "NEXT_PUBLIC_READING_ADDRESS"]); if (!rpc) chainFields.push("CHAIN_RPC_URL");
   let chainDetail = "Configured. Run connection checks to confirm the network and contract."; let chainStatus: ServiceReadiness["status"] = chainFields.length ? "missing" : "unverified";
   if (probe && !chainFields.length && rpc && address && isAddress(address)) try {
     const client = createPublicClient({ transport: http(rpc, { timeout: 10000, retryCount: 0 }) });
     if (await client.getChainId() !== chainId) throw new Error();
     const code = await client.getCode({ address }); if (!code || code === "0x") throw new Error();
-    const reviewer = await client.readContract({ address, abi: editionsAbi, functionName: "reviewer" });
-    const permitHash = await client.readContract({ address, abi: editionsAbi, functionName: "PERMIT_TYPEHASH" });
-    if (permitHash !== keccak256(toHex(`Permit(${editionPermitTypes.Permit.map(f => `${f.type} ${f.name}`).join(",")})`))) throw new Error();
-    await client.readContract({ address, abi: editionsAbi, functionName: "canTrade", args: [reviewer] });
+    const reviewer = await client.readContract({ address, abi: readingAbi, functionName: "reviewer" });
+    const permitHash = await client.readContract({ address, abi: readingAbi, functionName: "PERMIT_TYPEHASH" });
+    if (permitHash !== keccak256(toHex(`Permit(${readingPermitTypes.Permit.map(f => `${f.type} ${f.name}`).join(",")})`))) throw new Error();
+    const teamHash = await client.readContract({ address, abi: readingAbi, functionName: "APPROVAL_TYPEHASH" });
+    if (teamHash !== keccak256(toHex(`TeamApproval(${teamApprovalTypes.TeamApproval.map(f => `${f.type} ${f.name}`).join(",")})`))) throw new Error();
     if (!hasKey("EDITION_REVIEWER_PRIVATE_KEY")) { chainDetail = "Contract is reachable. Configure the matching reviewer signing key to publish."; chainStatus = "unverified"; }
     else if (privateKeyToAccount(envValue("EDITION_REVIEWER_PRIVATE_KEY") as `0x${string}`).address.toLowerCase() !== reviewer.toLowerCase()) { chainDetail = "The reviewer signing key does not match this contract."; chainStatus = "error"; }
-    else { chainDetail = "Network, NFT contract API and reviewer signing key match."; chainStatus = "ready"; }
-  } catch { chainDetail = "Could not validate this network and NFT contract. Check the RPC, chain ID and deployment address."; chainStatus = "error"; }
-  rows.push({ name: "NFT blockchain", status: chainStatus, detail: chainFields.length ? "A deployment and RPC connection are required." : chainDetail, fields: chainFields, link: chainId === 11155111 && address && isAddress(address) ? `https://sepolia.etherscan.io/address/${address}` : undefined });
+    else { chainDetail = "Network, reading contract API and reviewer signing key match."; chainStatus = "ready"; }
+  } catch { chainDetail = "Could not validate this network and reading contract. Check the RPC, chain ID and deployment address."; chainStatus = "error"; }
+  rows.push({ name: "Fixed-price reading blockchain", status: chainStatus, detail: chainFields.length ? "A deployment and RPC connection are required." : chainDetail, fields: chainFields, link: chainId === 11155111 && address && isAddress(address) ? `https://sepolia.etherscan.io/address/${address}` : undefined });
   const aiFields = missing(["ZG_COMPUTE_API_KEY"]); let aiStatus: ServiceReadiness["status"] = aiFields.length ? "missing" : "unverified";
-  let aiDetail = "Private Computer powers image review and collector suggestions. Model access is checked without generating paid inference.";
+  let aiDetail = "Private Computer powers private comic review. Model access is checked without generating paid inference.";
   if (probe && !aiFields.length) try {
     const url = new URL(envValue("ZG_COMPUTE_BASE_URL") || "https://router-api.0g.ai/v1");
     if (url.protocol !== "https:") throw new Error();

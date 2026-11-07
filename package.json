@@ -55,7 +55,10 @@
     "editions:deploy:local": "npm run deploy:editions:local --workspace @consentcraft/contracts",
     "editions:deploy:sepolia": "npm run deploy:editions:sepolia --workspace @consentcraft/contracts",
     "editions:index": "npm run editions --workspace @consentcraft/indexer --",
-    "test:editions": "node tests/integration/editions-local.mjs"
+    "test:editions": "node tests/integration/editions-local.mjs",
+    "reading:abi": "npm run abi:reading --workspace @consentcraft/contracts",
+    "reading:deploy:sepolia": "npm run deploy:reading:sepolia --workspace @consentcraft/contracts",
+    "test:reading": "node tests/integration/reading-local.mjs"
   },
   "dependencies": {
     "@0gfoundation/0g-compute-ts-sdk": "0.9.0",

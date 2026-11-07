@@ -23,7 +23,9 @@ export type Database = {
   /** Private appeal evidence and reviewer reasons. Only salted hashes go on chain. */
   appealNotes?: Record<string, { evidence?: { text: string; salt: string; hash: string; at: string }; reason?: { text: string; salt: string; hash: string; at: string } }>;
   editionSecrets?: Record<string, { wrappedKey: string }>;
-  editionSubmissions?: { userId: string; at: number }[];
+  readingSecrets?: Record<string, { wrappedKey: string }>;
+  readingJobs?: Record<string, { id: string; expires: number }>;
+  editionSubmissions?: { userId: string; at: number; readingKey?: string }[];
   abuseReports?: { id: string; comicId: string; userId: string; text: string; at: string; status: "open" | "resolved"; response?: string }[];
   curatorRequests?: { userId: string; at: number }[];
   curatorSuggestions?: { key: string; at: number; result: { picks: { tokenId: string; reason: string; title: string }[]; requestId: string; model: string; at: string; promptVersion: string } }[];
