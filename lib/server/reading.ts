@@ -10,6 +10,9 @@ import { buildBundle, newContentKey, previewImage, openBundle, wrapKey, unwrapKe
 import { fetchVerified, upload, gatewayUrl } from "./arweave";
 import { envValue, privateKey } from "./env";
 import { screenWith0G, SCREENING_PROMPT_VERSION } from "./zg";
+import { blankPages } from "./blank-pages";
+import { assessOriginality, assertOriginalityCurrent, parsePublicOriginality } from "./originality";
+import { ORIGINALITY_THRESHOLD, originalityId, publicOriginality } from "@/lib/originality";
 
 function member(db: Database, token: string | undefined, raw: unknown, owner = false) {
   const user = sessionUser(db, token); ensure(user, "Sign in with your wallet.", 401);
@@ -98,7 +101,7 @@ export async function reopenReading(token: string | undefined, raw: unknown) {
   ensure(Number(block.timestamp) > (r.permitExpiresAt || 0), "A publication permit is still valid. Wait until it expires before reopening; withdrawing approval on chain prevents publication meanwhile.", 409);
   await database(db => {
     const { project } = member(db, token, raw, true);
-    ensure(project.reading?.key === r.key && !((db.readingJobs?.[project.id]?.expires || 0) > Date.now()), "Curator review is running. Retry shortly.", 409);
+    ensure(project.reading?.key === r.key && !((db.readingJobs?.[project.id]?.expires || 0) > Date.now()) && !((db.originalityJobs?.[project.id]?.expires || 0) > Date.now()), "Curator or similarity review is running. Retry shortly.", 409);
     ensure(project.reading.status !== "published" && Number(block.timestamp) > (project.reading.permitExpiresAt || 0), "A publication permit was issued while reopening. Wait for its expiry and retry.", 409);
     delete project.reading; if (db.readingSecrets) delete db.readingSecrets[project.id];
     project.state = "draft"; project.rosterFrozen = false; project.approvals = []; project.revision++;
@@ -129,6 +132,11 @@ export async function curateReading(token: string | undefined, raw: unknown) {
     return p;
   };
   try {
+    const blank = await blankPages(snapshot.panels);
+    ensure(blank.length === 0, `Page${blank.length === 1 ? "" : "s"} ${blank.join(", ")} ${blank.length === 1 ? "is" : "are"} blank or a single colour. Add artwork before publishing.`, 409);
+    const originality = await assessOriginality(snapshot);
+    ensure(originality.maxSimilarity <= ORIGINALITY_THRESHOLD, "This comic is more than 85% similar to a published comic. Publication is blocked; review the comparison and reopen for corrections.", 409);
+    snapshot = await database(db => structuredClone(active(db)));
     if (!snapshot.reading!.bundleTxId) {
       const key = newContentKey(); const bundle = buildBundle(snapshot.panels, key); const cover = await previewImage(snapshot.panels);
       const tags = [{ name: "App-Name", value: "ConsentCraft" }, { name: "Type", value: "fixed-price-reading" }];
@@ -152,7 +160,9 @@ export async function curateReading(token: string | undefined, raw: unknown) {
       }, true);
     }
     const final = await database(db => structuredClone(active(db))); await approved(final, cfg);
+    await assertOriginalityCurrent(final.reading!.originality);
     ensure(final.reading!.status === "approved", "Curator review flagged this comic. Reopen it for corrections and new team approvals.", 409);
+    await database(db => { delete active(db).reading!.error; }, true);
     return { reviewReady: true };
   } catch (error) {
     await database(db => { const p = db.projects.find(p => p.id === projectId); if (p && p.reading?.key === snapshot.reading?.key) p.reading!.error = error instanceof Error ? error.message.slice(0, 300) : "Review failed."; }, true);
@@ -160,23 +170,30 @@ export async function curateReading(token: string | undefined, raw: unknown) {
   } finally { await database(db => { if (db.readingJobs?.[projectId]?.id === job) delete db.readingJobs[projectId]; }, true); }
 }
 export async function prepareReading(token: string | undefined, raw: unknown) {
-  const cfg = readingConfig(); const p = await database(db => structuredClone(member(db, token, raw, true).project));
-  const r = await approved(p, cfg); ensure(r.status === "approved" && r.review && !r.review.flagged, "Complete curator review first.", 409);
+  const cfg = readingConfig(); let p = await database(db => structuredClone(member(db, token, raw, true).project));
+  const reviewed = await approved(p, cfg); ensure(reviewed.status === "approved" && reviewed.review && !reviewed.review.flagged, "Complete curator review first.", 409);
+  const similarity = await assessOriginality(p);
+  ensure(similarity.maxSimilarity <= ORIGINALITY_THRESHOLD, "This comic is more than 85% similar to a published comic. Publication is blocked; review the comparison and reopen for corrections.", 409);
+  p = await database(db => structuredClone(member(db, token, raw, true).project));
+  const r = await approved(p, cfg);
+  ensure(r.status === "approved" && r.originality && originalityId(r.originality) === originalityId(similarity), "Similarity review changed. Retry publication.", 409);
+  const scanId = originalityId(r.originality);
   let uri = r.uri, metadataHash = r.metadataHash;
-  if (!uri) {
-    const metadata = { schema: "consentcraft.reading.v1", name: p.title, description: p.description, genre: p.genre, image: `ar://${r.coverTxId}`, license: p.terms, priceWei: r.priceWei, contributors: p.members.map(m => ({ address: m.address, name: m.name, role: m.role, share: m.share })), manifestHash: r.manifestHash, contentHash: r.contentHash, review: r.review, access: "Fixed-price, non-transferable reading access. Multiple readers can purchase the same comic. Copyright remains with the creators." };
+  if (!uri || r.metadataOriginalityId !== scanId) {
+    const metadata = { schema: "consentcraft.reading.v1", name: p.title, description: p.description, genre: p.genre, image: `ar://${r.coverTxId}`, license: p.terms, priceWei: r.priceWei, contributors: p.members.map(m => ({ address: m.address, name: m.name, role: m.role, share: m.share })), manifestHash: r.manifestHash, contentHash: r.contentHash, review: r.review, originality: publicOriginality(r.originality), access: "Fixed-price, non-transferable reading access. Multiple readers can purchase the same comic. Copyright remains with the creators." };
     const bytes = new TextEncoder().encode(JSON.stringify(metadata)); metadataHash = keccak256(bytes);
     uri = `ar://${await upload(bytes, "application/json", [{ name: "App-Name", value: "ConsentCraft" }])}`;
-    await database(db => { const current = member(db, token, raw, true).project; ensure(current.reading?.key === r.key, "Review changed.", 409); current.reading.uri = uri; current.reading.metadataHash = metadataHash; }, true);
+    await database(db => { const current = member(db, token, raw, true).project; ensure(current.reading?.key === r.key && current.reading.originality && originalityId(current.reading.originality) === scanId, "Review changed.", 409); current.reading.uri = uri; current.reading.metadataHash = metadataHash; current.reading.metadataOriginalityId = scanId; }, true);
   }
   await fetchVerified(uri.slice(5), metadataHash!);
+  await assertOriginalityCurrent(r.originality);
   const signer = privateKeyToAccount(privateKey("EDITION_REVIEWER_PRIVATE_KEY", "Reading publication reviewer"));
   ensure(getAddress(await cfg.client.readContract({ address: cfg.address, abi: cfg.abi, functionName: "reviewer" })) === signer.address, "Reviewer key does not match the reading contract.", 503);
   const chainTime = Number((await cfg.client.getBlock()).timestamp); const deadline = BigInt(Math.max(chainTime, Math.floor(Date.now() / 1000)) + 600);
   const permit = { author: getAddress(p.members[0].address!), key: r.key, contentHash: r.contentHash, manifestHash: r.manifestHash!, metadataHash: metadataHash!, uriHash: keccak256(toHex(uri)), licenseHash: r.licenseHash, contributorsHash: r.contributorsHash, price: BigInt(r.priceWei), approvalDeadline: BigInt(r.approvalDeadline), deadline };
   // Revalidate and reserve expiry atomically after external I/O. Reopening must
   // wait out every issued permit, including one issued by another instance.
-  await database(async db => { const current = member(db, token, raw, true).project; const stored = await approved(current, cfg); ensure(stored.key === r.key && stored.status === "approved", "Review changed.", 409); stored.permitExpiresAt = Math.max(stored.permitExpiresAt || 0, Number(deadline)); }, true);
+  await database(async db => { const current = member(db, token, raw, true).project; const stored = await approved(current, cfg); ensure(stored.key === r.key && stored.status === "approved" && stored.originality && originalityId(stored.originality) === scanId && stored.metadataOriginalityId === scanId, "Review changed.", 409); stored.permitExpiresAt = Math.max(stored.permitExpiresAt || 0, Number(deadline)); }, true);
   const signature = await signer.signTypedData({ domain: readingDomain(r), types: readingPermitTypes, primaryType: "Permit", message: permit });
   return { permit, uri, team: { ...readingContributors(p), approvals: p.members.map(m => r.approvals.find(a => a.userId === m.userId)!.signature) }, signature };
 }
@@ -225,9 +242,9 @@ export async function readingSnapshot(wallet?: `0x${string}`, page = 0, rawId?: 
   }
   const comics = await Promise.all(ids.map(async id => {
     const [c, delisted, canRead, team] = await Promise.all([cfg.client.readContract({ ...base, functionName: "comics", args: [id] }), cfg.client.readContract({ ...base, functionName: "delisted", args: [id] }), wallet ? cfg.client.readContract({ ...base, functionName: "canRead", args: [id, wallet] }) : false, cfg.client.readContract({ ...base, functionName: "getContributors", args: [id] })]);
-    let metadata: { name?: string; description?: string; genre?: string; license?: string; image?: string; contributors?: unknown[] } = {};
+    let metadata: { name?: string; description?: string; genre?: string; license?: string; image?: string; contributors?: unknown[]; originality?: unknown } = {};
     if (/^ar:\/\/[a-zA-Z0-9_-]{43}$/.test(c[8])) try { metadata = JSON.parse(Buffer.from(await fetchVerified(c[8].slice(5), c[4], { attempts: 1 })).toString("utf8")); } catch {}
-    return { id: id.toString(), author: c[0], priceWei: c[7].toString(), readers: c[9].toString(), uri: c[8], manifestHash: c[3], delisted, canRead, title: metadata.name || `Comic #${id}`, description: metadata.description || "", genre: metadata.genre || "", license: metadata.license || "", cover: /^ar:\/\/[a-zA-Z0-9_-]{43}$/.test(metadata.image || "") ? gatewayUrl(metadata.image!.slice(5)) : undefined, contributors: team[0].map((address, i) => ({ address, share: team[1][i] })) };
+    return { id: id.toString(), author: c[0], priceWei: c[7].toString(), readers: c[9].toString(), uri: c[8], manifestHash: c[3], delisted, canRead, title: metadata.name || `Comic #${id}`, description: metadata.description || "", genre: metadata.genre || "", license: metadata.license || "", originality: parsePublicOriginality(metadata.originality), cover: /^ar:\/\/[a-zA-Z0-9_-]{43}$/.test(metadata.image || "") ? gatewayUrl(metadata.image!.slice(5)) : undefined, contributors: team[0].map((address, i) => ({ address, share: team[1][i] })) };
   }));
   return { comics, total: total.toString(), credit: credit.toString(), page, confirmations: cfg.confirmations };
 }

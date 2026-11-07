@@ -80,6 +80,25 @@ test("each collaborator approves separately before curator submission unlocks", 
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(page.locator(".review-surface")).toContainText("Collaborator approvals · 2/2");
     await expect(page.getByRole("button", { name: "Submit approved comic for curator review", exact: true })).toBeEnabled();
+    // UI fixture only: no external upload or paid similarity/curator call.
+    await page.route("**/api/reading", async route => {
+      if (route.request().method() === "POST" && route.request().postDataJSON()?.action === "review") return route.fulfill({ status: 409, json: { error: "This comic is more than 85% similar to a published comic." } });
+      return route.continue();
+    });
+    await page.route("**/api/studio", async route => {
+      if (route.request().method() !== "GET") return route.continue();
+      const response = await route.fetch(); const body = await response.json();
+      const p = body.projects.find((p: { id: string }) => p.id === id);
+      if (p?.reading) Object.assign(p.reading, { status: "approved", originality: { version: "consentcraft-originality-v2", contentHash: p.reading.contentHash, catalogueHash: `0x${"11".repeat(32)}`, crux: "A private synopsis of this saved comic.", maxSimilarity: 90, comparedComicCount: "1", model: "UI fixture", requestId: "ui-similarity-fixture", comparisonRequestIds: [], at: "2026-11-07T00:00:00.000Z", comparisons: [{ comicId: "1", title: "Earlier story", similarity: 90, relevance: "Similar characters and sequence." }] } });
+      return route.fulfill({ response, json: body });
+    });
+    await page.getByRole("button", { name: "Submit approved comic for curator review", exact: true }).click();
+    await expect(page.getByRole("region", { name: "Similarity scan results" })).toContainText("90% highest match");
+    await expect(page.getByRole("button", { name: "Publish at 0.005 ETH", exact: true })).toBeDisabled();
+    await page.getByText("Compare published comics", { exact: true }).click();
+    await expect(page.getByRole("link", { name: "Earlier story", exact: true })).toHaveAttribute("href", "/readings/1");
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.getByRole("button", { name: "Reopen and reset all approvals", exact: true }).click();
     await page.getByRole("tab", { name: "Review & publish" }).click();
     await expect(page.getByRole("button", { name: "Start team review", exact: true })).toBeVisible();

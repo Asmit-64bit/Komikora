@@ -10,6 +10,7 @@ import { AppError } from "@/lib/store";
 import type { PagePlaintext } from "./content";
 import { NotConfiguredError, envValue, privateKey } from "./env";
 import { privateCompletion, privateComputerConfigured } from "./private-computer";
+import { blankPages } from "./blank-pages";
 
 export const SCREENING_PROMPT_VERSION = "consentcraft-0g-screening-v2";
 const MAX_IMAGE_SIDE = 768; // Smaller images cost fewer vision tokens.
@@ -91,16 +92,6 @@ async function smallImage(page: PagePlaintext) {
     .resize({ width: MAX_IMAGE_SIDE, height: MAX_IMAGE_SIDE, fit: "inside", withoutEnlargement: true })
     .jpeg({ quality: 75 }).toBuffer();
   return `data:image/jpeg;base64,${bytes.toString("base64")}`;
-}
-
-/** Free deterministic check: blank or single-colour pages are flagged without paid inference. */
-async function blankPages(pages: PagePlaintext[]) {
-  const blank: number[] = [];
-  for (const [i, page] of pages.entries()) {
-    const stats = await sharp(Buffer.from(page.image, "base64")).stats();
-    if (stats.channels.every(c => c.stdev < 1.5)) blank.push(i + 1);
-  }
-  return blank;
 }
 
 export function parseVerdict(text: string) {

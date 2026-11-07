@@ -12,6 +12,7 @@ import sharp from 'sharp';
 import {createPublicClient,createWalletClient,http,keccak256,toHex} from 'viem';
 import {privateKeyToAccount,generatePrivateKey} from 'viem/accounts';
 import {hardhat} from 'viem/chains';
+import {catalogueHash,originalityId,ORIGINALITY_VERSION} from '../../lib/originality.ts';
 const root=process.cwd(),namespace=`reading-test-${randomUUID()}`,file=path.join(root,'.data',namespace,'studio.json'),children=[];
 const artifact=JSON.parse(await readFile('contracts/artifacts/contracts/ConsentCraftReading.sol/ConsentCraftReading.json','utf8'));
 async function port(){const s=netServer();s.listen(0,'127.0.0.1');await once(s,'listening');const p=s.address().port;await new Promise(r=>s.close(r));return p;}
@@ -27,7 +28,7 @@ try{
  const wallet=account=>createWalletClient({chain:hardhat,transport:http(rpc),account});
  const deployed=await wallet(author).deployContract({abi:artifact.abi,bytecode:artifact.bytecode,args:[reviewer.address,treasury.address]});const address=(await chain.waitForTransactionReceipt({hash:deployed})).contractAddress;
  const base=`http://127.0.0.1:${await port()}`,kek=randomBytes(32);
- const server=start(['node_modules/next/dist/bin/next','start','--hostname','127.0.0.1','--port',new URL(base).port],{env:{...process.env,STUDIO_STORAGE:'file',VERCEL:'',CONSENTCRAFT_DATA_NAMESPACE:namespace,APP_ORIGIN:base,NEXT_PUBLIC_READING_ADDRESS:address,NEXT_PUBLIC_CHAIN_ID:'31337',CHAIN_RPC_URL:rpc,CHAIN_CONFIRMATIONS:'0',READING_START_BLOCK:'0',EDITION_REVIEWER_PRIVATE_KEY:accountKeys[2],CONTENT_KEY_ENCRYPTION_KEY:toHex(kek),ARWEAVE_GATEWAY:`http://127.0.0.1:${storage.address().port}`,RATE_LIMIT_MULTIPLIER:'100'}});
+ const server=start(['node_modules/next/dist/bin/next','start','--hostname','127.0.0.1','--port',new URL(base).port],{env:{...process.env,STUDIO_STORAGE:'file',VERCEL:'',CONSENTCRAFT_DATA_NAMESPACE:namespace,APP_ORIGIN:base,NEXT_PUBLIC_READING_ADDRESS:address,NEXT_PUBLIC_CHAIN_ID:'31337',CHAIN_RPC_URL:rpc,CHAIN_CONFIRMATIONS:'0',READING_START_BLOCK:'0',EDITION_REVIEWER_PRIVATE_KEY:accountKeys[2],CONTENT_KEY_ENCRYPTION_KEY:toHex(kek),ARWEAVE_GATEWAY:`http://127.0.0.1:${storage.address().port}`,ZG_COMPUTE_MODEL:'similarity-fixture',RATE_LIMIT_MULTIPLIER:'100'}});
  // The signer was generated in this process; retain its private key separately
  // instead of exposing it in logs or passing it through a command argument.
  await ready(async()=>{if(server.exitCode!==null)throw Error('App exited');return(await fetch(`${base}/api/studio`)).ok;});
@@ -53,6 +54,8 @@ try{
  const bundle=Buffer.from(JSON.stringify({schema:'consentcraft.bundle.v1',cipher:'AES-256-GCM',pageCount:1,pages:[{index:0,iv:sealed.iv.toString('base64'),ciphertext:sealed.body.toString('base64'),plaintextHash:keccak256(plain)}]}));
  const bundleId=randomBytes(32).toString('base64url'),metadataId=randomBytes(32).toString('base64url');const metadata=Buffer.from(JSON.stringify({name:'Shared reading fixture',description:'Fixture',genre:'Original',license:p.terms}));items.set(bundleId,bundle);items.set(metadataId,metadata);
  const db=JSON.parse(await readFile(file,'utf8'));const saved=db.projects.find(p=>p.id===id);Object.assign(saved.reading,{status:'approved',manifestHash:keccak256(bundle),bundleTxId:bundleId,coverTxId:'c'.repeat(43),uri:`ar://${metadataId}`,metadataHash:keccak256(metadata),review:{score:8000,flagged:false,reasons:['Synthetic approved fixture'],model:'fixture',provider:'fixture',teeVerified:false,at:new Date().toISOString(),promptVersion:'fixture',uncertainty:'Synthetic test only'}});
+ const originality={version:ORIGINALITY_VERSION,contentHash:saved.reading.contentHash,catalogueHash:catalogueHash(31337,address,[]),crux:'Synthetic private synopsis',maxSimilarity:0,comparedComicCount:'0',model:'similarity-fixture',requestId:'synthetic-scan',comparisonRequestIds:[],at:new Date().toISOString(),comparisons:[]};
+ saved.reading.originality=originality;saved.reading.metadataOriginalityId=originalityId(originality);
  const wrapped=seal(kek,key,`consentcraft:key:${id}`);db.readingSecrets={[id]:{wrappedKey:`${wrapped.iv.toString('base64')}.${wrapped.body.toString('base64')}`}};await writeFile(file,JSON.stringify(db));
  const prepared=await a.call('/api/reading',{action:'prepare',id});
  const permit={...prepared.permit,price:BigInt(prepared.permit.price),approvalDeadline:BigInt(prepared.permit.approvalDeadline),deadline:BigInt(prepared.permit.deadline)};

@@ -4,6 +4,8 @@ Vercel deployments require persistent PostgreSQL for wallet sessions and drafts.
 
 The active Marketplace (`/marketplace`) now sells **fixed-price reading access**. Every collaborator, including the owner, reviews and signs approval of the exact saved comic, price, license and revenue split before curator review and publication. Multiple wallets can buy the same comic and retain their own reading access. Library (`/library`) replaces Trade; there are no new auctions, bids or edition-supply settings. Proceeds are automatically credited to the approved collaborator shares after the existing 2.5% platform fee. See [the current publishing and reading workflow](docs/FIXED_PRICE_READING.md).
 
+Similarity scanning from the originality branch is integrated before upload and publication: scores above 85% block publication, all collaborators must still approve, and failed/rejected scans count toward the scan quota. See [scanner behavior, safeguards and limits](docs/ORIGINALITY.md).
+
 The active contract is `ConsentCraftReading`, deployed on Sepolia; its public manifest is `contracts/deployments/reading-sepolia.json`. The previous `ConsentCraftEditions` and legacy paid-reading contracts remain intact. Existing historical edition links, purchases and escrow are available through Earlier editions; the existing auction with a bid can still be settled according to its original terms.
 
 Private 0G image review and encrypted Arweave storage remain part of publishing. There is no mock approval or fallback to standard inference. The Network page checks the new reading contract and existing service configuration. The older [NFT MVP documentation](docs/NFT_MVP.md) describes the historical editions model rather than the active publishing flow.

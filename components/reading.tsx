@@ -13,6 +13,8 @@ import { teamApprovalTypes } from "@/lib/reading-permit";
 import type { Project } from "@/lib/types";
 import { editionRequest } from "@/lib/editions-client";
 import { useStudio } from "./studio-provider";
+import { SimilarityFindings } from "./similarity-findings";
+import { ORIGINALITY_THRESHOLD } from "@/lib/originality";
 
 const same = (a?: string, b?: string) => !!a && !!b && a.toLowerCase() === b.toLowerCase();
 const eth = (value: string) => `${formatEther(BigInt(value))} ETH`;
@@ -42,6 +44,7 @@ export function ReadingPublish({ project: p, dirty, refresh, onSave, saving = fa
   const myApproval = r?.approvals.some(a => a.userId === data.user?.id);
   const allApproved = !!r && p.members.every(m => r.approvals.some(a => a.userId === m.userId));
   const expired = !!r && r.approvalDeadline <= now;
+  const similarityBlocked = !!r?.originality && r.originality.maxSimilarity > ORIGINALITY_THRESHOLD;
   async function run(label: string, work: () => Promise<unknown>) { setBusy(label); setError(""); try { await work(); } catch (e) { setError(errorText(e)); } finally { await refresh().catch(() => {}); setBusy(""); } }
   if (p.edition || p.publication) return <section className="surface review-surface"><h2>Move to collaborative publishing</h2><p>This submission uses an earlier publishing contract. Its records and reading access are preserved.</p>{p.edition && p.edition.status !== "minted" ? <><p>Reopen this unminted submission, set a fixed reading price, and collect approval from every collaborator.</p><button className="button" disabled={!owner || !!busy} onClick={() => run("Reopening…", () => editionRequest({ action: "reopen", id: p.id }))}>Reopen for fixed-price reading</button></> : <p>Start a new project for a new fixed-price publication.</p>}{error && <p role="alert">{error}</p>}</section>;
   const requirements = [!readingAddress && "Publishing setup is not complete. Check Network & services.", dirty && "Save your latest changes before starting team review.", (!p.panels.length || p.panels.some(panel => !panel.image)) && "Add artwork to every panel and save it.", (!p.priceWei || BigInt(p.priceWei) <= BigInt(0)) && "Set and save a positive fixed reading price in Team & shares.", !p.terms.trim() && "Add a reading license in Team & shares."].filter(Boolean);
@@ -63,9 +66,10 @@ export function ReadingPublish({ project: p, dirty, refresh, onSave, saving = fa
       {myApproval && r.status !== "published" && <button className="text-button" disabled={!!busy || !readingAddress} onClick={() => run("Confirm approval withdrawal in your wallet…", async () => { await write("revokeApproval", [r.key]); await readingRequest({ action: "withdraw", id: p.id }); })}>Withdraw my approval</button>}
       {!allApproved && r.status !== "published" && <p className="field-hint" role="status">Waiting for every collaborator to approve. Curator submission and publication stay locked until everyone agrees.</p>}
       {r.review && <div className="chain-proof"><strong>Curator review · {r.review.score / 100}/100</strong><p>{r.review.reasons.join(" · ")}</p><p>{r.review.uncertainty}</p></div>}
-      {owner && ["team-review", "uploaded"].includes(r.status) && <button className="button purple" disabled={!allApproved || !!busy || expired} onClick={() => run("Reviewing comic images…", () => readingRequest({ action: "review", id: p.id }))}>{busy || "Submit approved comic for curator review"}</button>}
+      {r.originality && <SimilarityFindings result={r.originality}/>}
+      {owner && ["team-review", "uploaded", "approved"].includes(r.status) && <button className="button purple" disabled={!allApproved || !!busy || expired} onClick={() => run("Scanning similarity and reviewing comic images…", () => readingRequest({ action: "review", id: p.id }))}>{busy || (r.status === "approved" ? "Refresh similarity scan" : "Submit approved comic for curator review")}</button>}
       {r.status === "flagged" && <p role="status">The curator flagged this comic. The owner can reopen it for corrections; every collaborator must approve the corrected version.</p>}
-      {owner && r.status === "approved" && <button className="button purple" disabled={!allApproved || !!busy || expired} onClick={() => run("Preparing publication…", async () => {
+      {owner && r.status === "approved" && <button className="button purple" disabled={!allApproved || !!busy || expired || similarityBlocked} onClick={() => run("Checking similarity and preparing publication…", async () => {
         const prepared = await readingRequest<{ permit: Record<string, string>; uri: string; team: { people: Hex[]; allocations: number[]; approvals: Hex[] }; signature: Hex }>({ action: "prepare", id: p.id });
         setBusy("Confirm publication in your wallet…");
         await write("publishComic", [{ ...prepared.permit, price: BigInt(prepared.permit.price), approvalDeadline: BigInt(prepared.permit.approvalDeadline), deadline: BigInt(prepared.permit.deadline) }, prepared.uri, prepared.team, prepared.signature]);
@@ -90,6 +94,7 @@ export function ReadingMarket({ comicId, library = false }: { comicId?: string; 
     <label className="search-field">Search comics<input value={search} onChange={e => setSearch(e.target.value)} placeholder="Find a story…"/></label>
     {library && !signed && <button className="button purple" onClick={openConnectModal}>Sign in to open your library</button>}{(q.error || error) && <p className="form-error" role="alert">{error || errorText(q.error)}</p>}{q.isFetching && !q.data && <p role="status">Opening the library…</p>}
     <div className="edition-grid">{comics.map(c => <article className="surface edition-card" key={c.id}>{c.cover && <img src={c.cover} alt={`${c.title} cover`} loading="lazy"/>}<h2><Link href={`/readings/${c.id}`}>{c.title}</Link></h2><p>{c.description}</p><p>{c.genre} · {c.readers} {c.readers === "1" ? "reader" : "readers"}</p><strong>{eth(c.priceWei)} · reading access</strong><details><summary>License & contributor shares</summary><p>{c.license}</p>{c.contributors.map(m => <p className="edition-wallet" key={m.address}>{m.address} · {m.share / 100}%</p>)}<p>2.5% platform fee. Copyright remains with the creators. Reading access belongs to the purchasing wallet.</p></details>
+      {c.originality && <SimilarityFindings result={c.originality}/>}
       {signed && c.canRead ? <button className="button purple" onClick={() => setReader(c.id)}>Read comic</button> : c.delisted ? <p>Unavailable for new purchases. Existing readers retain access.</p> : <button className="button purple" disabled={!!busy} onClick={() => {
         if (!signed) { openConnectModal?.(); return; }
         setBusy(c.id); setError(""); void write("buyReading", [BigInt(c.id)], BigInt(c.priceWei)).then(() => q.refetch()).catch(e => setError(errorText(e))).finally(() => setBusy(""));

@@ -25,6 +25,10 @@ export type Database = {
   editionSecrets?: Record<string, { wrappedKey: string }>;
   readingSecrets?: Record<string, { wrappedKey: string }>;
   readingJobs?: Record<string, { id: string; expires: number }>;
+  originalityJobs?: Record<string, { id: string; expires: number }>;
+  originalityAttempts?: { userId: string; readingKey: string; at: number }[];
+  /** Private, hash-bound synopses. Never returned by studio or marketplace APIs. */
+  originalitySummaries?: Record<string, { crux: string; model: string; requestId: string; at: string }>;
   editionSubmissions?: { userId: string; at: number; readingKey?: string }[];
   abuseReports?: { id: string; comicId: string; userId: string; text: string; at: string; status: "open" | "resolved"; response?: string }[];
   curatorRequests?: { userId: string; at: number }[];

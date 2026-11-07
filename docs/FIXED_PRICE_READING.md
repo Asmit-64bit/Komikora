@@ -12,6 +12,8 @@ The active studio publishes to `ConsentCraftReading`. It uses one fixed price pe
 
 AI review is advisory and cannot establish authorship or copyright. A flagged review issues no publication permit. The owner may reopen it for corrections and collect new approvals. No automatic or mock approval substitutes for team or curator checks.
 
+After unanimous approval, a [similarity scan](ORIGINALITY.md) compares the saved comic with every confirmed comic in the current reading contract before upload. Similarity above 85% blocks publication. Results are cached against approved content and a verified catalogue fingerprint. Failed/rejected new scans consume the separate scan budget; publication permits require current findings, and metadata is regenerated after changed results.
+
 ## Reading and proceeds
 
 `buyReading(comicId)` requires the exact approved price. Each successful purchase records a permanent wallet entitlement; all collaborators can also read their own publication. A 2.5% platform fee is credited to the existing project treasury. The remaining proceeds are allocated to the approved collaborator wallets. Integer-division dust goes to the first contributor (the owner); the sum of all credits always equals the purchase amount. Every recipient withdraws their own credit; no untrusted recipient is called during a purchase.
