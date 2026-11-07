@@ -230,6 +230,8 @@ export async function readingSnapshot(wallet?: `0x${string}`, page = 0, rawId?: 
       const end = fromBlock + BigInt(999);
       const logs = await cfg.client.getLogs({ address: cfg.address, event: parseAbiItem("event ReadingPurchased(uint256 indexed comicId, address indexed reader, uint256 price)"), args: { reader: wallet }, fromBlock, toBlock: end < cfg.blockNumber ? end : cfg.blockNumber });
       for (const log of logs) if (log.args.comicId) owned.add(log.args.comicId.toString());
+      const inherited = await cfg.client.getLogs({ address: cfg.address, event: parseAbiItem("event ReadingInherited(uint256 indexed comicId, address indexed from, address indexed heir)"), args: { heir: wallet }, fromBlock, toBlock: end < cfg.blockNumber ? end : cfg.blockNumber });
+      for (const log of inherited) if (log.args.comicId) owned.add(log.args.comicId.toString());
     }
     const contributions = await database(db => db.projects.filter(p => p.reading?.status === "published" && p.reading.chainId === cfg.chainId && p.reading.contract.toLowerCase() === cfg.address.toLowerCase() && p.members.some(m => m.address?.toLowerCase() === wallet.toLowerCase())).map(p => p.reading!.comicId!));
     for (const comic of contributions) if (BigInt(comic) <= count) owned.add(comic);

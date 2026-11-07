@@ -13,7 +13,8 @@ import {createPublicClient,createWalletClient,http,keccak256,toHex} from 'viem';
 import {privateKeyToAccount,generatePrivateKey} from 'viem/accounts';
 import {hardhat} from 'viem/chains';
 const root=process.cwd(),namespace=`reading-test-${randomUUID()}`,file=path.join(root,'.data',namespace,'studio.json'),children=[];
-const artifact=JSON.parse(await readFile('contracts/artifacts/contracts/ConsentCraftReading.sol/ConsentCraftReading.json','utf8'));
+const heirloom=process.env.READING_TEST_HEIRLOOM==='1', contractName=heirloom?'ConsentCraftReadingHeirloom':'ConsentCraftReading';
+const artifact=JSON.parse(await readFile('contracts/artifacts/contracts/'+contractName+'.sol/'+contractName+'.json','utf8'));
 async function port(){const s=netServer();s.listen(0,'127.0.0.1');await once(s,'listening');const p=s.address().port;await new Promise(r=>s.close(r));return p;}
 function start(args,options={}){const c=spawn(process.execPath,args,{cwd:root,windowsHide:true,stdio:['ignore','pipe','pipe'],...options});let output='';c.stdout.on('data',d=>output=(output+d).slice(-100000));c.stderr.on('data',d=>output=(output+d).slice(-100000));c.output=()=>output;children.push(c);return c;}
 async function ready(fn){for(let i=0;i<150;i++){try{if(await fn())return;}catch{}await new Promise(r=>setTimeout(r,200));}throw Error('Test service did not start.');}
@@ -53,6 +54,7 @@ try{
  const bundle=Buffer.from(JSON.stringify({schema:'consentcraft.bundle.v1',cipher:'AES-256-GCM',pageCount:1,pages:[{index:0,iv:sealed.iv.toString('base64'),ciphertext:sealed.body.toString('base64'),plaintextHash:keccak256(plain)}]}));
  const bundleId=randomBytes(32).toString('base64url'),metadataId=randomBytes(32).toString('base64url');const metadata=Buffer.from(JSON.stringify({name:'Shared reading fixture',description:'Fixture',genre:'Original',license:p.terms}));items.set(bundleId,bundle);items.set(metadataId,metadata);
  const db=JSON.parse(await readFile(file,'utf8'));const saved=db.projects.find(p=>p.id===id);Object.assign(saved.reading,{status:'approved',manifestHash:keccak256(bundle),bundleTxId:bundleId,coverTxId:'c'.repeat(43),uri:`ar://${metadataId}`,metadataHash:keccak256(metadata),review:{score:8000,flagged:false,reasons:['Synthetic approved fixture'],model:'fixture',provider:'fixture',teeVerified:false,at:new Date().toISOString(),promptVersion:'fixture',uncertainty:'Synthetic test only'}});
+ saved.originality={crux:'Synthetic fixture',maxSimilarity:0,comparedComicCount:'0',model:'fixture',requestId:'fixture',at:new Date().toISOString(),comparisons:[]};
  const wrapped=seal(kek,key,`consentcraft:key:${id}`);db.readingSecrets={[id]:{wrappedKey:`${wrapped.iv.toString('base64')}.${wrapped.body.toString('base64')}`}};await writeFile(file,JSON.stringify(db));
  const prepared=await a.call('/api/reading',{action:'prepare',id});
  const permit={...prepared.permit,price:BigInt(prepared.permit.price),approvalDeadline:BigInt(prepared.permit.approvalDeadline),deadline:BigInt(prepared.permit.deadline)};
@@ -67,4 +69,26 @@ try{
  await send(reviewer,'setDelisted',[1n,true]);assert.equal((await buyerA.call('/api/reading/read/1')).pages.length,1);assert.equal((await buyerB.call('/api/reading/read/1')).pages.length,1);
  assert.equal(await chain.readContract({address,abi:artifact.abi,functionName:'credits',args:[collaborator.address]}),7800n);
  console.log('PASS unanimous on-chain publication, fixed-price purchases by two readers, independent encrypted HTTP reading, persistent access, libraries, and collaborator earnings.');
+ if(heirloom){
+  await send(alice,'configureInheritance',[[outsider.address],[10000],collaborator.address,BigInt(30*86400),BigInt(7*86400)]);
+  await send(author,'configureInheritance',[[bob.address,outsider.address],[6000,4000],collaborator.address,BigInt(30*86400),BigInt(7*86400)]);
+  assert.equal((await buyerA.call('/api/heirloom?owner='+alice.address)).plan.configured,true);
+  await chain.request({method:'evm_increaseTime',params:[30*86400+1]});await chain.request({method:'evm_mine',params:[]});
+  await send(outsider,'startInheritanceClaim',[alice.address]);await send(bob,'startInheritanceClaim',[author.address]);
+  await assert.rejects(send(bob,'finalizeInheritance',[author.address]));
+  await chain.request({method:'evm_increaseTime',params:[7*86400+1]});await chain.request({method:'evm_mine',params:[]});
+  await send(outsider,'finalizeInheritance',[alice.address]);await send(bob,'finalizeInheritance',[author.address]);
+  await buyerA.call('/api/reading/read/1',undefined,403);await other.call('/api/reading/read/1',undefined,403);
+  await send(outsider,'inheritReading',[alice.address,[1n]]);
+  assert.equal((await other.call('/api/reading/read/1')).pages[0].dialogue,'A shared story.');
+  assert.equal((await other.call('/api/reading?wallet='+outsider.address+'&library=1')).comics[0].id,'1');
+  const plan=await buyerB.call('/api/heirloom?owner='+author.address);assert.equal(plan.plan.finalized,true);assert.equal(plan.claimable,'7020');
+  await send(bob,'withdrawInheritedProceeds',[author.address,bob.address]);await send(outsider,'withdrawInheritedProceeds',[author.address,outsider.address]);
+  assert.equal(await chain.readContract({address,abi:artifact.abi,functionName:'credits',args:[author.address]}),0n);
+  await send(reviewer,'setDelisted',[1n,false]);await send(reviewer,'buyReading',[1n],10000n);
+  assert.equal(await chain.readContract({address,abi:artifact.abi,functionName:'claimableInheritedProceeds',args:[author.address,bob.address]}),3510n);
+  assert.equal((await buyerB.call('/api/reading/read/1')).pages.length,1);
+  console.log('PASS real inactivity claims, inherited HTTP reading and library discovery, split existing proceeds and future creator proceeds.');
+ }
+
 }finally{for(const child of children.reverse())if(child.exitCode===null)child.kill();await new Promise(r=>storage.close(r));}

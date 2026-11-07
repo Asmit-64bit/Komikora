@@ -47,10 +47,12 @@ contract ConsentCraftReading is EIP712, ReentrancyGuard {
         reviewer = signer; treasury = recipient;
     }
     function revokeApproval(bytes32 key) external {
+        _onActivity(msg.sender);
         revokedApprovals[msg.sender][key] = true;
         emit ApprovalRevoked(msg.sender, key);
     }
     function publishComic(Permit calldata p, string calldata uri, Team calldata team, bytes calldata reviewSignature) external nonReentrant returns(uint256 id) {
+        _onActivity(msg.sender);
         if (msg.sender != p.author || team.people.length == 0 || team.people.length > 64 || team.people[0] != p.author) revert Unauthorized();
         if (team.people.length != team.allocations.length || team.people.length != team.approvals.length || p.price == 0 || p.key == 0 || p.contentHash == 0 || p.manifestHash == 0 || p.metadataHash == 0 || p.licenseHash == 0 || comicForKey[p.key] != 0 || p.deadline < block.timestamp || p.approvalDeadline < block.timestamp || bytes(uri).length < 6 || bytes(uri).length > 240 || keccak256(bytes(uri)) != p.uriHash || keccak256(abi.encode(team.people, team.allocations)) != p.contributorsHash) revert Invalid();
         bytes32 teamDigest = _hashTypedDataV4(keccak256(abi.encode(APPROVAL_TYPEHASH, p.key, p.contentHash, p.licenseHash, p.contributorsHash, p.price, p.approvalDeadline)));
@@ -72,6 +74,7 @@ contract ConsentCraftReading is EIP712, ReentrancyGuard {
         emit ComicPublished(id, p.key, p.author, p.price, uri);
     }
     function buyReading(uint256 id) external payable nonReentrant {
+        _onActivity(msg.sender);
         Comic storage c = comics[id];
         if (c.author == address(0) || delisted[id]) revert Unavailable();
         if (purchased[id][msg.sender] || isContributor[id][msg.sender]) revert AlreadyPurchased();
@@ -79,17 +82,17 @@ contract ConsentCraftReading is EIP712, ReentrancyGuard {
         purchased[id][msg.sender] = true; ++c.readers;
         // Division before multiplication avoids overflow for arbitrary prices.
         uint256 fee = msg.value / 10000 * FEE_BPS + msg.value % 10000 * FEE_BPS / 10000;
-        credits[treasury] += fee;
+        _credit(treasury, fee);
         uint256 net = msg.value - fee; uint256 distributed;
         for (uint256 i = 1; i < contributors[id].length; ++i) {
             uint256 amount = net / 10000 * shares[id][i] + net % 10000 * shares[id][i] / 10000;
-            credits[contributors[id][i]] += amount; distributed += amount;
+            _credit(contributors[id][i], amount); distributed += amount;
         }
-        credits[contributors[id][0]] += net - distributed;
+        _credit(contributors[id][0], net - distributed);
         totalCredits += msg.value;
         emit ReadingPurchased(id, msg.sender, msg.value);
     }
-    function canRead(uint256 id, address reader) external view returns(bool) {
+    function canRead(uint256 id, address reader) public view virtual returns(bool) {
         return comics[id].author != address(0) && reader != address(0) && (purchased[id][reader] || isContributor[id][reader]);
     }
     function getContributors(uint256 id) external view returns(address[] memory, uint16[] memory) { return (contributors[id], shares[id]); }
@@ -99,10 +102,14 @@ contract ConsentCraftReading is EIP712, ReentrancyGuard {
         delisted[id] = value; emit Delisted(id, value);
     }
     function withdraw(address payable recipient) external nonReentrant {
+        _onActivity(msg.sender);
         uint256 amount = credits[msg.sender];
         if (amount == 0 || recipient == address(0)) revert Invalid();
         credits[msg.sender] = 0; totalCredits -= amount;
         (bool ok,) = recipient.call{value: amount}(""); if (!ok) revert Unavailable();
         emit Withdrawn(msg.sender, recipient, amount);
     }
+    /// @dev Extension hooks preserve the original marketplace behavior by default.
+    function _credit(address account, uint256 amount) internal virtual { credits[account] += amount; }
+    function _onActivity(address account) internal virtual {}
 }

@@ -25,6 +25,9 @@
     "deploy:editions:sepolia": "node --env-file-if-exists=.env ../node_modules/hardhat/dist/src/cli.js run --network sepolia scripts/deploy-editions.ts",
     "deploy:registry:galileo": "node --env-file-if-exists=.env ../node_modules/hardhat/dist/src/cli.js run --network ogGalileo scripts/deploy-registry.ts",
     "abi:reading": "node ../node_modules/hardhat/dist/src/cli.js run scripts/export-reading.ts",
-    "deploy:reading:sepolia": "node --env-file-if-exists=.env ../node_modules/hardhat/dist/src/cli.js run --network sepolia scripts/deploy-reading.ts"
+    "deploy:reading:sepolia": "node --env-file-if-exists=.env ../node_modules/hardhat/dist/src/cli.js run --network sepolia scripts/deploy-reading.ts",
+    "abi:heirloom": "node ../node_modules/hardhat/dist/src/cli.js run scripts/export-heirloom.ts",
+    "deploy:heirloom:local": "node --env-file=local-node.env ../node_modules/hardhat/dist/src/cli.js run --network localhost scripts/deploy-reading-heirloom.ts",
+    "deploy:heirloom:sepolia": "node --env-file-if-exists=.env ../node_modules/hardhat/dist/src/cli.js run --network sepolia scripts/deploy-reading-heirloom.ts"
   }
 }
